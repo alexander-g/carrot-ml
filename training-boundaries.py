@@ -19,7 +19,10 @@ def main(args:argparse.Namespace) -> bool:
 
 
 if __name__ == '__main__':
-    args = args.base_segmentation_training_argparser(pos_weight=10.0).parse_args()
+    args = args.base_segmentation_training_argparser(
+        pos_weight    = 10.0,
+        margin_weight = 1.0,
+    ).parse_args()
     ok   = main(args)
     if ok:
         print('Done')
