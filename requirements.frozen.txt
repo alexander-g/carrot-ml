@@ -36,6 +36,6 @@ six==1.16.0
 sympy==1.12
 torch==2.2.1
 torchvision==0.17.1
--e git+https://codeberg.org/alexander-g/traininglib@ab7f08c9ca16c107afcf50fb3831494411b5f881#egg=traininglib
+-e git+https://codeberg.org/alexander-g/traininglib@7453971aba0bd40dab0384ab487d391b0a49beca#egg=traininglib
 triton==2.2.0
 typing_extensions==4.10.0

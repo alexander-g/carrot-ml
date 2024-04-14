@@ -6,7 +6,7 @@ import os
 import numpy as np
 import PIL.Image
 
-from traininglib import datalib, modellib
+from traininglib import datalib, modellib, args
 
 
 #TODO: code re-use
@@ -14,10 +14,11 @@ from traininglib import datalib, modellib
 
 def inference(args: argparse.Namespace):
     inputs = datalib.collect_inputfiles(args.input)
-    model  = modellib.load_model(args.model).to(args.cuda)
+    model  = modellib.load_model(args.model).to(args.device)
     os.makedirs(args.output, exist_ok=True)
     
     print(f'Running inference on {len(inputs)} files.')
+    print(f'Using model {args.model}')
     print(f'Saving output to {args.output}')
     for i, imagefile in enumerate(inputs):
         print(f'[{i:4d}/{len(inputs)}]', end='\r')
@@ -38,17 +39,8 @@ def save_output(output, destination:str, inputfile:str) -> str:
 
 
 
-def get_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', required=True, help='Path to .pt.zip model')
-    parser.add_argument('--input', required=True, help='Path to csv split file')
-    parser.add_argument('--output', default='./inference/', help='Where to save results')
-    parser.add_argument('--cuda', action='store_const', const='cuda', default='cpu')
-    return parser
-
-
 if __name__ == '__main__':
-    args = get_argparser().parse_args()
+    args = args.base_inference_argparser().parse_args()
     inference(args)
 
     print('Done')
