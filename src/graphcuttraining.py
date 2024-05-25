@@ -5,22 +5,17 @@ import torch
 import torchvision
 
 from traininglib import datalib
-from traininglib.trainingtask import TrainingTask, Loss, Metrics
-from traininglib.segmentation import margin_loss_fn, SegmentationDataset
+from traininglib.trainingtask import Loss, Metrics
+from traininglib.segmentation import margin_loss_fn, PatchwiseTrainingTask
 
 
 
-class GraphcutTask(TrainingTask):
-    def __init__(self, *a, inputsize:int, **kw):
-        super().__init__(*a, **kw)
-        self.inputsize   = inputsize
-        self.cropfactors = (0.75, 1.33)
-        self.patchify    = True
-        self.rotate      = True
+class GraphcutTask(PatchwiseTrainingTask):
 
     @torch.jit.script_if_tracing
     def training_step(self, raw_batch) -> tp.Tuple[Loss, Metrics]:
-        x, t = self.prepare_batch(raw_batch)
+        x, t = self.prepare_batch(raw_batch, augment=True)
+        t    = t[:,:1]
         output = self.basemodule(x)
 
         y_points = output.y_points
@@ -37,59 +32,7 @@ class GraphcutTask(TrainingTask):
         logs = {'xsim':float(loss)}
         return loss, logs
 
-    #TODO: code re-use
-    def create_dataloaders(
-        self, 
-        trainsplit: tp.List, 
-        valsplit:   tp.List|None = None, 
-        **ld_kw,
-    ) -> tp.Tuple[tp.Iterable, tp.Iterable|None]:
-        patchsize_train = patchsize_val = None
-        if self.patchify:
-            # NOTE: *2 for cropping during augmentation
-            patchsize_train = self.inputsize * 2
-            patchsize_val   = self.inputsize
         
-        ds_train = SegmentationDataset(trainsplit, patchsize_train)
-        ld_train = datalib.create_dataloader(ds_train, shuffle=True, **ld_kw)
-        ld_val   = None
-        if valsplit is not None:
-            ds_val = SegmentationDataset(valsplit, patchsize_val)
-            ld_val = datalib.create_dataloader(ds_val, shuffle=False, **ld_kw)
-        return ld_train, ld_val
-
-    # TODO: code re-use!!
-    def augment(self, batch) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-        x,t = batch
-        new_x: tp.List[torch.Tensor] = []
-        new_t: tp.List[torch.Tensor] = []
-        for xi,ti in zip(x,t):
-            if self.cropfactors is not None:
-                xi,ti = datalib.random_crop(
-                    xi, 
-                    ti, 
-                    patchsize   = self.inputsize, 
-                    modes       = ['bilinear', 'nearest'], 
-                    cropfactors = self.cropfactors
-                )
-            xi,ti = datalib.random_rotate_flip(xi, ti, rotate=self.rotate)
-            new_x.append(xi)
-            new_t.append(ti)
-        x = torch.stack(new_x)
-        t = torch.stack(new_t)
-        return x,t
-
-    def prepare_batch(self, raw_batch) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-        x,t = raw_batch
-        assert t.dtype == torch.uint8
-        assert t.ndim  == 4 and t.shape[1] == 3, t.shape
-        t   = t[:,:1]
-
-        assert x.dtype == torch.float32
-
-        x,t = datalib.to_device(x, t, device=self.device)
-        x,t = self.augment((x,t))
-        return x,t
 
 def crosswise_similarity_loss(y:torch.Tensor, t:torch.Tensor) -> torch.Tensor:
     # y: [B,C,n] float32
@@ -105,7 +48,9 @@ def crosswise_similarity_loss(y:torch.Tensor, t:torch.Tensor) -> torch.Tensor:
     assert similarity_matrix.shape == target_matrix.shape
 
     return torch.nn.functional.binary_cross_entropy(
-        (similarity_matrix/2+0.5).clamp(0,1), 
+        # NOTE: *0.9999 to because values might overshoot above 1 slightly
+        # clamping caused issues
+        (similarity_matrix*0.99999/2+0.5), 
         target_matrix.float(), 
         reduction='none'
     )
