@@ -15,6 +15,7 @@ from traininglib.segmentation import (
 from traininglib.modellib import BaseModel
 from traininglib.paths.pathdataset import FirstComponentPatchedPathsDataset
 from traininglib.paths import pathutils as utils
+from . import treerings_clustering_legacy as treeringlib
 
 
 
@@ -37,8 +38,14 @@ class TreeringDetectionModel(SegmentationModel):
         self.px_per_mm = px_per_mm
         self.scale = resolution_to_scale(px_per_mm)
     
-    def prepare_image(self, image:str):
-        x = x0 = datalib.load_image(image, to_tensor=True, normalize=False)
+    def process_image(self, *a, progress_callback='ignored', **kw):
+        return super().process_image(*a,  **kw)
+    
+    def prepare_image(self, image:str|np.ndarray):
+        if isinstance(image, str):
+            image = datalib.load_image(image, to_tensor=True, normalize=False)
+        
+        x = x0 = torch.as_tensor(image)
         if self.scale != 1:
             H,W = x.shape[-2:]
             newshape = [ int(H * self.scale), int(W * self.scale) ]
@@ -48,8 +55,33 @@ class TreeringDetectionModel(SegmentationModel):
         if self.patchify:
             x = datalib.pad_to_minimum_size(x, self.inputsize)
             x = datalib.slice_into_patches_with_overlap(x, self.inputsize, self.slack)
-            x = [xi[None] for xi in x]
-        return x, x0
+            xbatch = [xi[None] for xi in x]
+        else:
+            xbatch = [x]
+        return xbatch, x0
+    
+    def finalize_inference(   # type: ignore [override]
+        self, 
+        raw: tp.List[torch.Tensor], 
+        x:   torch.Tensor,
+    ):
+        segmentation = super().finalize_inference(raw, x).classmap
+        paths, points, labels = treeringlib.tree_ring_clustering(segmentation)
+        # TODO: need to scale up the paths
+        ring_labels  = treeringlib.associate_boundaries(points, labels)
+        ring_points  = [
+            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) 
+                for r0,r1 in ring_labels
+        ]
+        ring_areas = [treeringlib.treering_area(*rp) for rp in ring_points]
+        return {
+            'segmentation'   : segmentation,
+            'ring_points'    : ring_points,
+            'points'         : points,
+            'labels'         : labels,
+            'ring_labels'    : ring_labels,
+            'ring_areas'     : ring_areas,
+        }
     
     def start_training(self, *a, task_kw, **kw):
         task_kw = {
@@ -59,6 +91,27 @@ class TreeringDetectionModel(SegmentationModel):
         return super()._start_training(
             TreeringDetectionTrainingTask, *a, task_kw=task_kw, **kw
         )
+    
+    @staticmethod
+    def segmentation_to_points(segmentation:np.ndarray) -> tp.Dict:
+        paths, points, labels  = treeringlib.tree_ring_clustering(segmentation)
+        rings                  = treeringlib.associate_boundaries(points, labels)
+        ring_points            = [
+            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) for r0,r1 in rings
+        ]
+        ring_areas             = [treeringlib.treering_area(*rp) for rp in ring_points]
+        return {
+            'segmentation'   : segmentation,
+            'ring_points'    : ring_points,
+            'points'         : points,
+            'labels'         : labels,
+            'ring_labels'    : rings,
+            'ring_areas'     : ring_areas,
+        }
+    
+    @staticmethod
+    def associate_cells_from_segmentation(cell_map:np.ndarray, ring_points):
+        return treeringlib.associate_cells_from_segmentation(cell_map, ring_points)
     
 
 

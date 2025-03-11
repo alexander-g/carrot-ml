@@ -27,6 +27,10 @@ def save_output(inferenceitem, destination:str) -> str:
             output = (output * 255).astype('uint8')
         PIL.Image.fromarray(output).save(outputpath)
         return outputpath
+    if 'segmentation' in output:
+        segmentation_u8 = (output['segmentation'] * 255).astype('uint8')
+        PIL.Image.fromarray(segmentation_u8).save(outputpath)
+        return outputpath
     else:
         raise NotImplementedError(type(output))
 
