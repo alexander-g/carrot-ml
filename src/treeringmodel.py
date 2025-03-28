@@ -16,11 +16,13 @@ from traininglib.modellib import BaseModel
 from traininglib.paths.pathdataset import FirstComponentPatchedPathsDataset
 from traininglib.paths import pathutils as utils
 from . import treerings_clustering_legacy as treeringlib
+from .cellsmodel import instancemap_to_points
+
+import skimage.measure as skmeasure
 
 
-
-# assuming minimum 0.1mm tree ring width, this results in 100px, should be enough
-HARDCODED_GOOD_RESOLUTION = 1000   # px/mm
+# assuming minimum 0.1mm tree ring width, this results in 10px, should be enough
+HARDCODED_GOOD_RESOLUTION = 100   # px/mm
 
 def resolution_to_scale(px_per_mm:float) -> float:
     return  HARDCODED_GOOD_RESOLUTION / px_per_mm
@@ -38,10 +40,13 @@ class TreeringDetectionModel(SegmentationModel):
         self.px_per_mm = px_per_mm
         self.scale = resolution_to_scale(px_per_mm)
     
+    # TODO: profiling, cpu faster than cuda
     def process_image(self, *a, progress_callback='ignored', **kw):
         return super().process_image(*a,  **kw)
     
     def prepare_image(self, image:str|np.ndarray):
+        # NOTE: no normalize because of memory issues
+        # TODO: use tifffile, read patch, resize, repeat
         if isinstance(image, str):
             image = datalib.load_image(image, to_tensor=True, normalize=False)
         
@@ -66,22 +71,7 @@ class TreeringDetectionModel(SegmentationModel):
         x:   torch.Tensor,
     ):
         segmentation = super().finalize_inference(raw, x).classmap
-        paths, points, labels = treeringlib.tree_ring_clustering(segmentation)
-        # TODO: need to scale up the paths
-        ring_labels  = treeringlib.associate_boundaries(points, labels)
-        ring_points  = [
-            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) 
-                for r0,r1 in ring_labels
-        ]
-        ring_areas = [treeringlib.treering_area(*rp) for rp in ring_points]
-        return {
-            'segmentation'   : segmentation,
-            'ring_points'    : ring_points,
-            'points'         : points,
-            'labels'         : labels,
-            'ring_labels'    : ring_labels,
-            'ring_areas'     : ring_areas,
-        }
+        return self.segmentation_to_points(segmentation)
     
     def start_training(self, *a, task_kw, **kw):
         task_kw = {
@@ -92,27 +82,146 @@ class TreeringDetectionModel(SegmentationModel):
             TreeringDetectionTrainingTask, *a, task_kw=task_kw, **kw
         )
     
-    @staticmethod
-    def segmentation_to_points(segmentation:np.ndarray) -> tp.Dict:
-        paths, points, labels  = treeringlib.tree_ring_clustering(segmentation)
-        rings                  = treeringlib.associate_boundaries(points, labels)
-        ring_points            = [
-            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) for r0,r1 in rings
+    def segmentation_to_points(self, segmentation:np.ndarray) -> tp.Dict:
+        paths = treeringlib.tree_ring_clustering(segmentation)
+        # scale up the paths to original size
+        paths = [ p / self.scale for p in paths ]
+        ring_labels = treeringlib.associate_boundaries(paths)
+        ring_points = [
+            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) for r0,r1 in ring_labels
         ]
-        ring_areas             = [treeringlib.treering_area(*rp) for rp in ring_points]
+        ring_areas = [treeringlib.treering_area(*rp) for rp in ring_points]
         return {
             'segmentation'   : segmentation,
             'ring_points'    : ring_points,
-            'points'         : points,
-            'labels'         : labels,
-            'ring_labels'    : rings,
+            'ring_labels'    : ring_labels,
             'ring_areas'     : ring_areas,
         }
     
+    @classmethod
+    def associate_cells_from_segmentation(
+        cls, 
+        cell_map:    np.ndarray, 
+        ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+        og_size:     tp.Optional[tp.Tuple[int,int]] = None,
+    ) -> tp.Tuple:
+        '''Assign cells to rings. 
+          If og_size is not None will scale the cell coordinates (but not rings)'''
+        #return treeringlib.associate_cells_from_segmentation(cell_map, ring_points, og_size)
+        cell_map = (cell_map > 0)
+        cell_points, instancemap = classmap_to_cell_points(cell_map, og_size)
+        return cls.associate_cells(cell_points, ring_points, instancemap)
+
     @staticmethod
-    def associate_cells_from_segmentation(cell_map:np.ndarray, ring_points):
-        return treeringlib.associate_cells_from_segmentation(cell_map, ring_points)
+    def associate_cells(
+        cell_points: tp.List[np.ndarray], 
+        ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+        instancemap: np.ndarray,
+    ):
+        # NOTE: ring_points in yx format, for legacy reasons
+        # converting to xy
+        ring_points = [
+            (p0[...,::-1], p1[...,::-1]) for p0,p1 in ring_points
+        ]
+        cell_info = associate_cells(cell_points, ring_points)
+        ring_per_cell = np.array([info['year'] for info in cell_info])
+        ringmap_rgb   = colorize_instancemap(instancemap, ring_per_cell)
+        return cell_info, ringmap_rgb
+
+
+def classmap_to_cell_points(
+    classmap: np.ndarray, 
+    og_size:  tp.Optional[tp.Tuple[int,int]] = None,
+) -> tp.Tuple[tp.List[np.ndarray], np.ndarray]:
+    assert classmap.dtype == np.bool_ and classmap.ndim == 2
+
+    instancemap = skmeasure.label(classmap).astype(np.int64)
+    cell_points = instancemap_to_points(instancemap)
+    if og_size is not None:
+        og_scale = np.array([
+            classmap.shape[1] / og_size[0],
+            classmap.shape[0] / og_size[1],
+        ])
+        cell_points = [
+            p / og_scale for p in cell_points
+        ]
+    return cell_points, instancemap
+
+def associate_cells(
+    cell_points: tp.List[np.ndarray], 
+    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+) -> tp.List[tp.Dict]:
+    '''Assign cells to a ring'''
+    cell_indices = np.cumsum([len(cell) for cell in cell_points])
+    all_cell_points = np.concatenate(cell_points)
+    # which point is in which ring
+    ring_for_points = -np.ones(len(all_cell_points), dtype=np.int64)
+
+    for i,(p0,p1) in enumerate(ring_points):
+        polygon = np.concatenate([p0,p1[::-1]], axis=0)
+        polygon = skmeasure.approximate_polygon(polygon, tolerance=5)
+
+        in_poly_mask = skmeasure.points_in_poly(all_cell_points, polygon)
+        ring_for_points = np.where(in_poly_mask, i, ring_for_points)
     
+    cellinfo = []
+    for j, ring_ixs in enumerate(np.split(ring_for_points, cell_indices)[:-1]):
+        uniques, counts = np.unique(ring_ixs, return_counts=True)
+        box_xy = [
+            cell_points[j][:,1].min(),
+            cell_points[j][:,0].min(),
+            cell_points[j][:,1].max(),
+            cell_points[j][:,0].max(),
+        ]
+
+        cellinfo.append({
+            'id':              j,
+            'box_xy':          box_xy,
+            'year':            int(uniques[counts.argmax()]),
+            'area':            polygon_area(cell_points[i]),
+            'position_within': 0.0,  # TODO
+        })
+    return cellinfo
+
+def polygon_area(points: np.ndarray) -> float:
+    '''Compute the area of a polygon given its vertices ordered clockwise.
+       Shoelace formula.'''
+    assert points.ndim == 2 and points.shape[1] == 2
+    
+    shifted_points = np.roll(points, -1, axis=0)
+    # cross product components (determinants)
+    cross_products = (points[:, 0] * shifted_points[:, 1] -
+                      points[:, 1] * shifted_points[:, 0])
+    
+    area = 0.5 * np.abs(np.sum(cross_products))
+    return area
+
+
+def colorize_instancemap(instancemap:np.ndarray, ring_per_cell:np.ndarray):
+    assert instancemap.ndim == 2 and instancemap.dtype == np.int64
+    assert ring_per_cell.ndim == 1 and ring_per_cell.dtype == np.int64
+
+    COLORS = [
+        #(255,255,255),
+        ( 23,190,207),
+        (255,127, 14),
+        ( 44,160, 44),
+        (214, 39, 40),
+        (148,103,189),
+        (140, 86, 75),
+        (188,189, 34),
+        (227,119,194),
+    ]
+
+    rgb = np.zeros(instancemap.shape+(3,), dtype=np.uint8)
+    for i, ring_idx in enumerate(np.unique(ring_per_cell)):
+        if ring_idx < 0:
+            continue
+        cell_ixs  = np.argwhere(ring_per_cell == ring_idx).ravel() +1
+        cell_mask = np.isin(instancemap, cell_ixs)
+        rgb[cell_mask] = COLORS[i % len(COLORS)]
+    return rgb
+
 
 
 class TreeringDetectionTrainingTask(PatchwiseTrainingTask):

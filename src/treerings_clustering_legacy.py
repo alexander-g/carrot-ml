@@ -20,8 +20,7 @@ def tree_ring_clustering(x:np.ndarray, **kw):
     assert x.ndim == 2
     paths        = segmentation_to_paths( x > 0 )
     merged_paths = merge_paths(paths, x.shape, **kw)  # type: ignore
-    labels       = [np.ones(len(p), int)*i+1 for i,p in enumerate(merged_paths)]
-    return merged_paths, np.concatenate(merged_paths), np.concatenate(labels)
+    return merged_paths
 
 
 
@@ -201,8 +200,12 @@ def find_next_boundary(
     next_l = unique_l[unique_counts.argmax()]
     return next_l
 
-def associate_boundaries(points:np.ndarray, labels:np.ndarray) -> tp.List:
+def associate_boundaries(paths:tp.List[np.ndarray]) -> tp.List:
     '''Group tree ring boundaries into tuples'''
+    if len(paths) == 0:
+        return []
+    points = np.concatenate(paths)
+    labels = np.concatenate([np.ones(len(p), int)*i+1 for i,p in enumerate(paths)])
     pairs = []
     for i,l in enumerate(np.unique(labels)):
         if l==0:
@@ -263,12 +266,13 @@ def associate_boundaries(points:np.ndarray, labels:np.ndarray) -> tp.List:
 # TODO: refactor
 def associate_cells_from_segmentation(
     cell_map:    np.ndarray, 
-    ring_points: np.ndarray, 
+    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+    og_size:     tp.Optional[tp.Tuple[int,int]] = None,
     min_area:    float=32,
 ):
     '''Assign a tree ring label to each cell'''
     assert cell_map.ndim == 2
-    assert ring_points.ndim == 3 and ring_points[-2:] == (2,2)
+
 
     # draw tree rings polygons to create a ring_map
     # then crop the ring_map at the cell locations to get the cell's label
@@ -276,6 +280,10 @@ def associate_cells_from_segmentation(
     _scale = 4
     H,W    = cell_map.shape
 
+    # if the cell_map is scaled down
+    og_scale = (1.0, 1.0)
+    if og_size is not None:
+        og_scale = (W/og_size[0], H/og_size[1])
 
     ring_map = np.zeros(np.array([H,W])//_scale, 'int16')
     for i,(p0,p1) in enumerate(ring_points):
@@ -318,7 +326,12 @@ def associate_cells_from_segmentation(
         max_label = cell_labels[counts.argmax()]
         ring_map_rgb[slices][cell_mask] = COLORS[max_label%len(COLORS)]
         
-        box_xy = [slices[1].start, slices[0].start, slices[1].stop, slices[0].stop]
+        box_xy = [
+            slices[1].start / og_scale[0], 
+            slices[0].start / og_scale[1], 
+            slices[1].stop  / og_scale[0], 
+            slices[0].stop  / og_scale[1],
+        ]
         position_within: tp.Optional[float] = None
         if within_map is not None:
             position_within = \
@@ -333,7 +346,7 @@ def associate_cells_from_segmentation(
     return cells, ring_map_rgb
 
 def create_within_map(
-    ring_points: np.ndarray, 
+    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
     imgshape:    tp.Tuple[int,int], 
     scale:       float = 1.0
 ) -> tp.Optional[np.ndarray]:
@@ -446,6 +459,8 @@ def project_points_onto_line(coef:tp.List, points:np.ndarray) -> np.ndarray:
 
 def projected_points_to_1d(proj_points:tp.List[np.ndarray]) -> tp.Optional[tp.List]:
     '''Convert sets of 2d points that lie on the same line to 1d points'''
+    if len(proj_points) == 0:
+        return None
     list_of_endpoints = list(map(get_endpoints_of_cluster, proj_points))
     anchor = get_endpoints_of_cluster(np.concatenate(list_of_endpoints)) # type: ignore
     if anchor is None:
@@ -493,6 +508,8 @@ def max_mutual_overlap(path0:np.ndarray, path1:np.ndarray) -> float:
     )
 
 def get_paths_in_ray(coef, e, paths, *args, **kw) -> tp.List:
+    if len(paths) == 0:
+        return []
     points    = np.concatenate(paths)
     labels    = np.concatenate([np.ones(len(p), int)*i for i,p in enumerate(paths)])
     inraymask = get_points_in_ray(coef, e, points, *args, **kw)
