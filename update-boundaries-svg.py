@@ -2,14 +2,20 @@ import argparse
 import os
 
 from traininglib import modellib
-from src.treeringmodel import TreeringDetectionModel
+from src.treeringmodel import TreeringDetectionModel, HARDCODED_GOOD_RESOLUTION
 
 
 def main(args:argparse.Namespace) -> bool:
     old_model = modellib.load_model(args.model)
+    if hasattr(old_model, 'px_per_mm'):
+        px_per_mm = old_model.px_per_mm
+    elif hasattr(old_model, 'scale'):
+        px_per_mm = HARDCODED_GOOD_RESOLUTION/old_model.scale
+    else:
+        px_per_mm = 1.0
     new_model = TreeringDetectionModel(
-        inputsize = old_model.inputsize,
-        px_per_mm = old_model.px_per_mm,
+        inputsize = getattr(old_model, 'inputsize', 512),
+        px_per_mm = px_per_mm,
     )
     new_model = new_model.eval().requires_grad_(False)
     print(new_model.load_state_dict(old_model.state_dict()))

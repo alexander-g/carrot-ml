@@ -20,9 +20,12 @@ from .cellsmodel import instancemap_to_points
 
 import skimage.measure as skmeasure
 
+from .util import load_and_scale_image
 
-# assuming minimum 0.1mm tree ring width, this results in 10px, should be enough
-HARDCODED_GOOD_RESOLUTION = 100   # px/mm
+
+
+# assuming minimum 0.1mm tree ring width, this results in 25px, should be enough
+HARDCODED_GOOD_RESOLUTION = 250   # px/mm
 
 def resolution_to_scale(px_per_mm:float) -> float:
     return  HARDCODED_GOOD_RESOLUTION / px_per_mm
@@ -31,10 +34,10 @@ def resolution_to_scale(px_per_mm:float) -> float:
 
 class TreeringDetectionModel(SegmentationModel):
     def __init__(self, *a, px_per_mm:float, **kw):
+        kw['patchify'] = True
         super().__init__(
             *a, 
             classes  = [Class('ring-boundaries', (255,255,255))], 
-            patchify = True,
             **kw
         )
         self.px_per_mm = px_per_mm
@@ -48,13 +51,14 @@ class TreeringDetectionModel(SegmentationModel):
         # NOTE: no normalize because of memory issues
         # TODO: use tifffile, read patch, resize, repeat
         if isinstance(image, str):
-            image = datalib.load_image(image, to_tensor=True, normalize=False)
+            #image = datalib.load_image(image, to_tensor=True, normalize=False)
+            image = load_and_scale_image(image, self.scale)   # type: ignore
         
         x = x0 = torch.as_tensor(image)
-        if self.scale != 1:
-            H,W = x.shape[-2:]
-            newshape = [ int(H * self.scale), int(W * self.scale) ]
-            x = datalib.resize_tensor(x, newshape, 'bilinear')
+        # if self.scale != 1:
+        #     H,W = x.shape[-2:]
+        #     newshape = [ int(H * self.scale), int(W * self.scale) ]
+        #     x = datalib.resize_tensor(x, newshape, 'bilinear')
         x0 = x    # no resize
         x  = x.float() / 255
         if self.patchify:
@@ -73,9 +77,9 @@ class TreeringDetectionModel(SegmentationModel):
         segmentation = super().finalize_inference(raw, x).classmap
         return self.segmentation_to_points(segmentation)
     
-    def start_training(self, *a, task_kw, **kw):
+    def start_training(self, *a, task_kw={}, **kw):
         task_kw = {
-            'px_per_mm': self.px_per_mm,
+            'scale':     self.scale,
             'inputsize': self.inputsize,
         } | task_kw
         return super()._start_training(
@@ -88,7 +92,8 @@ class TreeringDetectionModel(SegmentationModel):
         paths = [ p / self.scale for p in paths ]
         ring_labels = treeringlib.associate_boundaries(paths)
         ring_points = [
-            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) for r0,r1 in ring_labels
+            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) 
+                for r0,r1 in ring_labels
         ]
         ring_areas = [treeringlib.treering_area(*rp) for rp in ring_points]
         return {
@@ -151,7 +156,7 @@ def associate_cells(
     cell_points: tp.List[np.ndarray], 
     ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
 ) -> tp.List[tp.Dict]:
-    '''Assign cells to a ring'''
+    '''Assign cells to a ring. All coordinates in xy format.'''
     cell_indices = np.cumsum([len(cell) for cell in cell_points])
     all_cell_points = np.concatenate(cell_points)
     # which point is in which ring
@@ -168,17 +173,17 @@ def associate_cells(
     for j, ring_ixs in enumerate(np.split(ring_for_points, cell_indices)[:-1]):
         uniques, counts = np.unique(ring_ixs, return_counts=True)
         box_xy = [
-            cell_points[j][:,1].min(),
             cell_points[j][:,0].min(),
-            cell_points[j][:,1].max(),
+            cell_points[j][:,1].min(),
             cell_points[j][:,0].max(),
+            cell_points[j][:,1].max(),
         ]
 
         cellinfo.append({
             'id':              j,
             'box_xy':          box_xy,
             'year':            int(uniques[counts.argmax()]),
-            'area':            polygon_area(cell_points[i]),
+            'area':            polygon_area(cell_points[j]),
             'position_within': 0.0,  # TODO
         })
     return cellinfo

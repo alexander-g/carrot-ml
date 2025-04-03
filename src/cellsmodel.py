@@ -15,6 +15,8 @@ from traininglib.segmentation.connectedcomponents import (
 from traininglib.modellib import BaseModel
 from traininglib.trainingtask import TrainingTask, Loss, Metrics
 
+from .util import load_and_scale_image
+
 
 Box = tp.Tuple[int,int,int,int]
 
@@ -23,8 +25,10 @@ Box = tp.Tuple[int,int,int,int]
 # assuming 15-150um cell sizes, this results in 15-150px
 # TODO: automatically estimate from ground truth
 HARDCODED_GOOD_RESOLUTION = 1000   # px/mm
+
 # 0.8mm ~ 800px patch size
 HARDCODED_GOOD_PATCHSIZE_MM = 0.1 * 8
+
 # 75um ~ 75px slack
 HARDCODED_GOOD_SLACK_MM = 0.075
 
@@ -63,15 +67,12 @@ class CellDetectionModel(BaseModel):
     # TODO: code re-use with treerings
     def prepare_image(self, image:str|np.ndarray):
         # NOTE: no normalize because of memory issues
-        # TODO: use tifffile, read patch, resize, repeat
+        # TODO: use tifffile, read patch, resize, repeat!
         if isinstance(image, str):
-            image = datalib.load_image(image, to_tensor=True, normalize=False)
+            #image = datalib.load_image(image, to_tensor=True, normalize=False)
+            image = load_and_scale_image(image, self.scale)  # type: ignore
         
         x = x0 = torch.as_tensor(image)
-        if self.scale != 1:
-            H,W = x.shape[-2:]
-            newshape = [ int(H * self.scale), int(W * self.scale) ]
-            x = datalib.resize_tensor(x, newshape, 'bilinear')
         x0 = x    # no resize
         x  = x.float() / 255
         if self.patchify:
@@ -107,7 +108,7 @@ def instancemap_to_points(
     instancemap: np.ndarray, 
     scale:       float = 1.0
 ) -> tp.List[np.ndarray]:
-    assert instancemap.ndim == 2 and instancemap.dtype == np.int64
+    assert instancemap.ndim == 2 and instancemap.dtype in [np.int64, np.int32]
 
     contours:tp.List[np.ndarray] = []
     for i, prop in enumerate(skmeasure.regionprops(instancemap), start=1):
@@ -136,7 +137,8 @@ def relabel_instancemaps(
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
     assert map0.ndim == map1.ndim == 2
-    assert map0.dtype == map1.dtype == torch.int64
+    assert map0.dtype in [torch.int64, torch.int32]
+    assert map0.dtype == map1.dtype 
     assert overlapbox0[2:] == overlapbox1[2:]
     assert (torch.tensor(overlapbox0) >= 0).all()
     assert (torch.tensor(overlapbox1) >= 0).all()
@@ -196,6 +198,10 @@ def stitch_and_relabel_instancemaps_from_grid(
         row_shape = tuple(grid[0,-1,2:])
         instancemap_row_i = \
             datalib.stitch_overlapping_patches(instancemaps[i*W:][:W], row_shape, slack)
+        # NOTE: setting previous maps to None to conserve memory
+        for _q in range(i*W, (i+1)*W):
+            instancemaps[_q] = None  # type: ignore
+
         if i > 0:
             gridcell0 = grid_rows[i-1]
             gridcell1 = gridcell_row_i
@@ -211,7 +217,6 @@ def stitch_and_relabel_instancemaps_from_grid(
             )
         instancemap_rows.append(instancemap_row_i)
         grid_rows.append(gridcell_row_i)
-
 
     for i in range(H):
         instancemap_row_i = instancemap_rows[i]
@@ -319,6 +324,10 @@ class CellDetectionModule(torch.nn.Module):
         self.patchsize = patchsize
         self.scale = scale
         self.slack = 2** int(np.round(np.log2( patchsize*scale*0.15 )))
+        print('TODO: adjust maskrcnn parameters')
+        #self.basemodule.rpn._pre_nms_top_n['testing']  = max(2000, ds_train.objects_per_patch*40)
+        #self.basemodule.rpn._post_nms_top_n['testing'] = 
+        #self.basemodule.roi_heads.detections_per_img   = max(100,  ds_train.objects_per_patch*4)
 
     def forward(self, *x):
         outputs = self.basemodule(*x)
@@ -332,13 +341,14 @@ class CellDetectionModule(torch.nn.Module):
 
 def masks_to_instancemap(masks:torch.Tensor, threshold:float=0.5) -> torch.Tensor:
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
-       int64 instancemap, with each instance having a unique value'''
+       int32 instancemap, with each instance having a unique value'''
     assert masks.ndim == 4 and masks.shape[1] == 1
     if len(masks) == 0:
-        return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int64)
+        return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
-    instancelabels = torch.arange(1, len(masks)+1, device=masks.device)
+    instancelabels = \
+        torch.arange(1, len(masks)+1, device=masks.device, dtype=torch.int32)
     instances = (masks * instancelabels[:,None,None]).max(0)[0]
     return instances
 
@@ -502,7 +512,7 @@ if __name__ == 'XXX__main__':
     ld = datalib.create_dataloader(ds, batch_size=8)
     batch = next(iter(ld))
     t1 = time.time()
-    x,t   = prepare_batch(batch, patchsize=512, augment=True, device='cpu')
+    x,t   = prepare_batch(batch, patchsize=512, augment=True, device='cpu') # type: ignore
     t2 = time.time()
     print(t1-t0, t2-t1)
 
