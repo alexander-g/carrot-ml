@@ -44,7 +44,8 @@ class TreeringDetectionModel(SegmentationModel):
         self.scale = resolution_to_scale(px_per_mm)
     
     # TODO: profiling, cpu faster than cuda
-    def process_image(self, *a, progress_callback='ignored', **kw):
+    def process_image(self, *a, progress_callback:tp.Optional[tp.Callable] = None, **kw):
+        kw['progress_callback'] = progress_callback
         return super().process_image(*a,  **kw)
     
     def prepare_image(self, image:str|np.ndarray):
@@ -75,7 +76,8 @@ class TreeringDetectionModel(SegmentationModel):
         x:   torch.Tensor,
     ):
         segmentation = super().finalize_inference(raw, x).classmap
-        return self.segmentation_to_points(segmentation)
+        og_size = (x.shape[-1], x.shape[-2])
+        return self.segmentation_to_points(segmentation, og_size)
     
     def start_training(self, *a, task_kw={}, **kw):
         task_kw = {
@@ -86,10 +88,12 @@ class TreeringDetectionModel(SegmentationModel):
             TreeringDetectionTrainingTask, *a, task_kw=task_kw, **kw
         )
     
-    def segmentation_to_points(self, segmentation:np.ndarray) -> tp.Dict:
-        paths = treeringlib.tree_ring_clustering(segmentation)
-        # scale up the paths to original size
-        paths = [ p / self.scale for p in paths ]
+    @staticmethod
+    def segmentation_to_points(
+        segmentation: np.ndarray,
+        og_size:      tp.Optional[tp.Tuple[int,int]] = None,
+    ) -> tp.Dict:
+        paths = treeringlib.tree_ring_clustering(segmentation, og_size)
         ring_labels = treeringlib.associate_boundaries(paths)
         ring_points = [
             treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) 
@@ -130,8 +134,12 @@ class TreeringDetectionModel(SegmentationModel):
         ]
         cell_info = associate_cells(cell_points, ring_points)
         ring_per_cell = np.array([info['year'] for info in cell_info])
+        # safeguard
+        ring_per_cell = ring_per_cell.reshape(-1).astype('int64')
         ringmap_rgb   = colorize_instancemap(instancemap, ring_per_cell)
         return cell_info, ringmap_rgb
+
+
 
 
 def classmap_to_cell_points(
