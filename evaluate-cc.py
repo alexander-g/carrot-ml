@@ -116,10 +116,6 @@ def merge_metrics(metrics:tp.List[tp.Dict[str,float]]) -> tp.Dict:
     summetrics  = summetrics | { # type: ignore
         'precision': summetrics['TP'] / max(summetrics['TP'] + summetrics['FP'], 1),
         'recall': summetrics['TP'] / max(summetrics['TP'] + summetrics['FN'], 1),
-        'total-length': (
-            (summetrics['TP'] + summetrics['FP']) 
-            / (summetrics['TP'] + summetrics['FN'])
-        ),
     }
     return {
         'mean': meanmetrics,

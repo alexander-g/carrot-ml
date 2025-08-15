@@ -3,6 +3,7 @@ import os
 import typing as tp
 
 import torch
+import torchvision
 
 from traininglib import datalib, modellib, segmentation, unet
 from traininglib.segmentation import (
@@ -116,7 +117,12 @@ class CC_CellsTrainStep(modellib.SaveableModule):
         logs = { 'bce': float(bce), 'mgn':float(mgn) }
         return loss, logs
 
-
+jitter = torchvision.transforms.ColorJitter(
+    brightness = (0.7, 1.3),
+    contrast   = (0.7, 1.3),
+    saturation = (0.7, 1.3),
+    hue        = (-0.15, 0.15)
+)
 
 def prepare_batch(
     raw_batch: RawBatch, 
@@ -140,6 +146,8 @@ def prepare_batch(
     )
     inputs, targets = datalib.random_rotate_flip(inputs, targets)
     inputs, targets = inputs.to(device), targets.to(device)
+    # NOTE: jitter should be done on gpu, slow otherwise
+    inputs = jitter(inputs)
 
     return inputs, targets
 
