@@ -130,20 +130,26 @@ def prepare_batch(
     patchsize: int,
     device:    torch.device,
 ):
-    inputs  = torch.stack([
-        torch.as_tensor(item[0]) for item in raw_batch
-    ])
-    targets = torch.stack([
-        torch.as_tensor(item[1]) for item in raw_batch
-    ])
+    all_inputs  = []
+    all_targets = []
+
+    for i, item in enumerate(raw_batch):
+        x = torch.as_tensor(item[0])
+        t = torch.as_tensor(item[1])
+
+        x, t = datalib.random_crop(
+            x[None], 
+            t[None],
+            patchsize=patchsize, 
+            modes=['bilinear', 'nearest']
+        )
+        all_inputs.append(x[0])
+        all_targets.append(t[0])
+
+    inputs  = torch.stack(all_inputs)
+    targets = torch.stack(all_targets)
     targets = (targets > 0.5).float()
 
-    inputs, targets = datalib.random_crop(
-        inputs, 
-        targets, 
-        patchsize=patchsize, 
-        modes=['bilinear', 'nearest']
-    )
     inputs, targets = datalib.random_rotate_flip(inputs, targets)
     inputs, targets = inputs.to(device), targets.to(device)
     # NOTE: jitter should be done on gpu, slow otherwise

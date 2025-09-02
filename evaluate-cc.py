@@ -75,7 +75,10 @@ def are_files_matching(
 def evaluate_file_pair(outputfile:str, annotationfile:str):
     output = torch.as_tensor(tifffile.imread(outputfile)).to(torch.int32)
     annotation = datalib.load_image(annotationfile, mode='L')
-    annotation = concom.connected_components_indexed(annotation[0] > 0.5)
+    annotation = concom.connected_components_patchwise(
+        annotation[None] > 0.5, 
+        patchsize=512
+    )[0,0]
     annotation = torch.unique(annotation, return_inverse=True)[1].to(torch.int32)
 
     iou = IoU_matrix(output, annotation, zero_out_zero=True)
