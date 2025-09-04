@@ -24,7 +24,7 @@ def main(args:argparse.Namespace):
         x = load_image(imagepath)
 
         with torch.no_grad():
-            output = model(x, batchsize=4)
+            output = model(x, batchsize=4, px_per_mm=args.px_per_mm)
         
         outputdir = args.output
         if outputdir == './inference':
@@ -89,7 +89,14 @@ def load_image(path:str) -> torch.Tensor:
 
 
 def get_parser() -> argparse.ArgumentParser:
-    return args.base_inference_argparser()
+    parser = args.base_inference_argparser()
+    parser.add_argument(
+        '--px-per-mm', 
+        type = float, 
+        help = 'Image resolution',
+        required = True, 
+    )
+    return parser
 
 
 if __name__ == '__main__':

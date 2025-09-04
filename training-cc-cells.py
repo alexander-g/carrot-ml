@@ -15,7 +15,11 @@ def main(args:args.Namespace):
     module  = CC_CellsModule()
     step    = CC_CellsTrainStep(module, inputsize=args.inputsize)
     # NOTE: *2 because of cropping augmentations
-    dataset = CC_CellsDataset(args.trainsplit)
+    dataset = CC_CellsDataset(
+        args.trainsplit, 
+        patchsize = args.inputsize*2, 
+        px_per_mm = args.px_per_mm
+    )
 
     # NOTE: threaded because getting errors otherwise
     ld_kw = {'loader_type': 'threaded'}
@@ -32,6 +36,12 @@ def main(args:args.Namespace):
 def get_argparser() -> argparse.ArgumentParser:
     parser = args.base_training_argparser_with_splits(
         default_epochs=1000,
+    )
+    parser.add_argument(
+        '--px-per-mm', 
+        type = float, 
+        help = 'Image resolution',
+        required = True, 
     )
     return parser
 

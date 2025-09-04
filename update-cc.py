@@ -18,7 +18,7 @@ def update(args:argparse.Namespace):
     else:
         assert 0, f'Unknown class: {clsname}'
     
-    scripted  = torch.jit.script(inference)
+    scripted  = torch.jit.script(inference.eval())
     scripted.save(args.model.replace('.pt.zip', '.torchscript'))
 
 
