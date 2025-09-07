@@ -2,6 +2,9 @@ import glob
 import os
 import typing as tp
 
+import numpy as np
+import PIL.Image
+import scipy.ndimage
 import torch
 import torchvision
 
@@ -44,6 +47,7 @@ class CC_CellsInference(torch.nn.Module):
         self.patchsize = patchsize
         self.slack = 32                                                         # TODO
         
+        # in working size, not original image size
         self.min_object_size_px = \
             int(HARDCODED_MIN_CELLSIZE_UM * 1000 // module.px_per_mm)
 
@@ -55,6 +59,17 @@ class CC_CellsInference(torch.nn.Module):
         px_per_mm: float,
         batchsize: int = 1
     ):
+        x, grid, n, og_size = self.prepare(x, px_per_mm)
+        batch_outputs = []
+        for i in range(0, n, batchsize):
+            batch_output = self.process_batch(x, grid, i, n, batchsize)
+            batch_outputs.extend(list(batch_output))
+        raw_output = self.stitch_batch_outputs(batch_outputs, grid)
+        output     = self.postprocess_output(raw_output)
+        return output
+
+    
+    def prepare(self, x:torch.Tensor, px_per_mm:float):
         assert x.ndim == 3 and x.shape[-1] == 3 and x.dtype==torch.uint8, \
             'Input must be a single RGB uint8 image in HWC format'
         
@@ -72,44 +87,65 @@ class CC_CellsInference(torch.nn.Module):
         x = x.permute(2,0,1) / 255
         x = datalib.resize_tensor2(x, [h,w], 'bilinear' )
 
-        all_outputs = []
-
         shape = torch.tensor([h,w])
         grid  = grid_for_patches(shape, self.patchsize, self.slack)
         n     = grid.reshape(-1,4).shape[0]
-        for i in range(0, n, batchsize):
-            x_patches = []
-            for j in range(i, min(i+batchsize, n)):
-                gridcell = grid.reshape(-1,4)[j]
-                x_patch  = get_patch_from_grid(x, grid, torch.tensor(j))
-                x_patches.append(x_patch)
+        
+        return x, grid, n, (H,W)
+    
+    def process_batch(
+        self, 
+        x:    torch.Tensor, 
+        grid: torch.Tensor, 
+        i:    int, 
+        n:    int,
+        batchsize: int
+    ) -> torch.Tensor:
+        x_patches = []
+        for j in range(i, min(i+batchsize, n)):
+            gridcell = grid.reshape(-1,4)[j]
+            x_patch  = get_patch_from_grid(x, grid, torch.tensor(j))
+            x_patches.append(x_patch)
 
-            x_batch = torch.stack(x_patches)
-            output:torch.Tensor = self.module(x_batch)
-            output = output.sigmoid().cpu()
-
-            all_outputs.extend( list(output) )
-
+        x_batch = torch.stack(x_patches)
+        output:torch.Tensor = self.module(x_batch)
+        output = output.sigmoid().cpu()
+        return output
+    
+    def stitch_batch_outputs(
+        self,
+        outputs: tp.List[torch.Tensor], 
+        grid:    torch.Tensor,
+        og_size: tp.Optional[tp.Tuple[int,int]] = None,
+    ):
+        h = int(grid[-1,-1,-2])
+        w = int(grid[-1,-1,-1])
         full_output = torch.ones([1,1,h,w])
-        for i,patch in enumerate(all_outputs):
+        for i,patch in enumerate(outputs):
             paste_patch(full_output, patch, grid, torch.tensor(i), self.slack)
 
-        # TODO: replace with below module
+        if og_size is not None:
+            full_output = datalib.resize_tensor2(full_output, og_size, 'bilinear')
+        return full_output
+    
+    def postprocess_output(self, output:torch.Tensor):
         instancemap = \
-            concom.connected_components_patchwise(full_output > 0.5, patchsize=512)
+            concom.connected_components_patchwise(output > 0.5, patchsize=512)
         instancemap = instancemap[0,0]
         instancemap = \
             remove_small_objects(instancemap, threshold=self.min_object_size_px)
         instancemap = torch.unique(instancemap, return_inverse=True)[1]
         
         return {
-            'raw':         full_output[0,0],
+            'raw':         output[0,0],
             'instancemap': instancemap,
         }
 
 
+
 def remove_small_objects(instancemap:torch.Tensor, threshold:int) -> torch.Tensor:
-    assert instancemap.ndim == 2 and instancemap.dtype == torch.int64
+    assert instancemap.ndim == 2
+    assert instancemap.dtype == torch.int64 or instancemap.dtype == torch.int32
     
     labels, counts = torch.unique(instancemap, return_counts=True)
     good_labels = labels[counts > threshold]
@@ -213,4 +249,74 @@ class CC_CellsDataset(PatchedCachingDataset):
         target = datalib.load_image(targetfile, mode='L')
         return input, target
 
+
+
+
+
+class CC_Cells_CARROT(modellib.SaveableModule):
+    def __init__(self, module:CC_CellsInference):
+        super().__init__()
+        self.module = module
+        self.requires_grad_(False).eval()
+
+    def process_image(
+        self, 
+        imagepath: str, 
+        px_per_mm: float,
+        batchsize: int = 1,
+        progress_callback: tp.Optional[tp.Callable[[float],None]] = None
+    ):
+        x = self.load_image(imagepath)
+        print('DBG', 1, x.shape)
+        x, grid, n, og_size = self.module.prepare(x, px_per_mm)
+        print('DBG', 2, x.shape)
+        batch_outputs = []
+        for i in range(0, n, batchsize):
+            batch_output = self.module.process_batch(x, grid, i, n, batchsize)
+            batch_outputs.extend(list(batch_output))
+            if progress_callback is not None:
+                progress_callback( i/n )
+        print('DBG', 3)
+        raw_output = \
+            self.module.stitch_batch_outputs(batch_outputs, grid, og_size)
+        print('DBG', 4,raw_output.shape)
+        output = self.postprocess_output(raw_output)
+        print('DBG', 5)
+        output = self.finalize_output(output)
+        print('DBG', 6)
+        return output
+    
+    def postprocess_output(self, output:torch.Tensor):
+        # NOTE: scipy is faster than my current implementation
+        instancemap_np, _ = \
+            scipy.ndimage.label( output[0,0].numpy() > 0.5, structure=np.ones([3,3]) )
+        print('DBG 4.1')
+        instancemap = torch.as_tensor(instancemap_np)
+        print('DBG 4.2')
+        instancemap = remove_small_objects(
+            instancemap, 
+            threshold=self.module.min_object_size_px
+        )
+        print('DBG 4.3')
+        # not needed with scipy
+        #instancemap = torch.unique(instancemap, return_inverse=True)[1]
+        
+        return {
+            'raw':         output[0,0],
+            'instancemap': instancemap,
+        }
+    
+    def finalize_output(self, output:tp.Dict) -> tp.Dict[str, np.ndarray]:
+        return {
+            'classmap':   (output['raw'] > 0.5).numpy(),
+            'instancemap':(output['instancemap']).numpy(),
+        }
+
+    @staticmethod
+    def load_image(imagepath:str) -> torch.Tensor:
+        return torch.as_tensor(
+            np.array(
+                PIL.Image.open(imagepath)
+            )
+        )
 

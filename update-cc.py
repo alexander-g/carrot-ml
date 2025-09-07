@@ -3,7 +3,11 @@ import argparse
 import torch
 
 from traininglib import modellib
-from src.cc_celldetection import CC_CellsModule, CC_CellsInference
+from src.cc_celldetection import (
+    CC_CellsModule, 
+    CC_CellsInference, 
+    CC_Cells_CARROT,
+)
 
 
 def update(args:argparse.Namespace):
@@ -18,8 +22,12 @@ def update(args:argparse.Namespace):
     else:
         assert 0, f'Unknown class: {clsname}'
     
-    scripted  = torch.jit.script(inference.eval())
+    scripted = torch.jit.script(inference.eval())
     scripted.save(args.model.replace('.pt.zip', '.torchscript'))
+
+    carrotmodule = CC_Cells_CARROT(inference)
+    carrotmodule.save(args.model.replace('.pt.zip', '.carrot.pt.zip'))
+
 
 
 def get_argparser() -> argparse.ArgumentParser:
