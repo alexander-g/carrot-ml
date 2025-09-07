@@ -59,7 +59,7 @@ class CC_CellsInference(torch.nn.Module):
         px_per_mm: float,
         batchsize: int = 1
     ):
-        x, grid, n, og_size = self.prepare(x, px_per_mm)
+        x, grid, n, og_shape = self.prepare(x, px_per_mm)
         batch_outputs = []
         for i in range(0, n, batchsize):
             batch_output = self.process_batch(x, grid, i, n, batchsize)
@@ -114,9 +114,9 @@ class CC_CellsInference(torch.nn.Module):
     
     def stitch_batch_outputs(
         self,
-        outputs: tp.List[torch.Tensor], 
-        grid:    torch.Tensor,
-        og_size: tp.Optional[tp.Tuple[int,int]] = None,
+        outputs:  tp.List[torch.Tensor], 
+        grid:     torch.Tensor,
+        og_shape: tp.Optional[tp.Tuple[int,int]] = None,
     ):
         h = int(grid[-1,-1,-2])
         w = int(grid[-1,-1,-1])
@@ -124,8 +124,8 @@ class CC_CellsInference(torch.nn.Module):
         for i,patch in enumerate(outputs):
             paste_patch(full_output, patch, grid, torch.tensor(i), self.slack)
 
-        if og_size is not None:
-            full_output = datalib.resize_tensor2(full_output, og_size, 'bilinear')
+        if og_shape is not None:
+            full_output = datalib.resize_tensor2(full_output, og_shape, 'bilinear')
         return full_output
     
     def postprocess_output(self, output:torch.Tensor):
@@ -264,52 +264,60 @@ class CC_Cells_CARROT(modellib.SaveableModule):
         imagepath: str, 
         px_per_mm: float,
         batchsize: int = 1,
+        displayshape: tp.Optional[tp.Tuple[int,int]] = None,
         progress_callback: tp.Optional[tp.Callable[[float],None]] = None
     ):
+        assert displayshape is None or len(displayshape) == 2
+
         x = self.load_image(imagepath)
-        print('DBG', 1, x.shape)
-        x, grid, n, og_size = self.module.prepare(x, px_per_mm)
-        print('DBG', 2, x.shape)
+        x, grid, n, og_shape = self.module.prepare(x, px_per_mm)
         batch_outputs = []
         for i in range(0, n, batchsize):
             batch_output = self.module.process_batch(x, grid, i, n, batchsize)
             batch_outputs.extend(list(batch_output))
             if progress_callback is not None:
                 progress_callback( i/n )
-        print('DBG', 3)
+        if displayshape is None:
+            displayshape = og_shape
         raw_output = \
-            self.module.stitch_batch_outputs(batch_outputs, grid, og_size)
-        print('DBG', 4,raw_output.shape)
-        output = self.postprocess_output(raw_output)
-        print('DBG', 5)
-        output = self.finalize_output(output)
-        print('DBG', 6)
+            self.module.stitch_batch_outputs(batch_outputs, grid, displayshape)
+        output = self.postprocess_output(raw_output, og_shape)
         return output
     
-    def postprocess_output(self, output:torch.Tensor):
+    def postprocess_output(self, output:torch.Tensor, og_shape:tp.Tuple[int,int]):
+        output = output[0,0]
         # NOTE: scipy is faster than my current implementation
         instancemap_np, _ = \
-            scipy.ndimage.label( output[0,0].numpy() > 0.5, structure=np.ones([3,3]) )
-        print('DBG 4.1')
+            scipy.ndimage.label( output.numpy() > 0.5, structure=np.ones([3,3]) )
         instancemap = torch.as_tensor(instancemap_np)
-        print('DBG 4.2')
         instancemap = remove_small_objects(
             instancemap, 
             threshold=self.module.min_object_size_px
         )
-        print('DBG 4.3')
-        # not needed with scipy
+        # NOTE: not needed with scipy
         #instancemap = torch.unique(instancemap, return_inverse=True)[1]
+
+        classmap = (output > 0.5)
+        if og_shape != instancemap.shape:
+            classmap_og = datalib.resize_tensor2(
+                classmap[None].float(), 
+                og_shape, 
+                mode='nearest'
+            )[0].to(classmap.dtype)
+            instancemap_og = datalib.resize_tensor2(
+                instancemap[None].float(), 
+                og_shape, 
+                mode='nearest'
+            )[0].to(instancemap.dtype)
+        else:
+            classmap_og = classmap
+            instancemap_og = instancemap
         
         return {
-            'raw':         output[0,0],
-            'instancemap': instancemap,
-        }
-    
-    def finalize_output(self, output:tp.Dict) -> tp.Dict[str, np.ndarray]:
-        return {
-            'classmap':   (output['raw'] > 0.5).numpy(),
-            'instancemap':(output['instancemap']).numpy(),
+            'classmap':    classmap_og.numpy(),
+            'instancemap': instancemap_og.numpy(),
+            'classmap_for_display':    classmap.numpy(),
+            'instancemap_for_display': instancemap.numpy(),
         }
 
     @staticmethod
