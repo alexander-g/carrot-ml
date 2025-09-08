@@ -17,6 +17,7 @@ from traininglib.segmentation import (
     PatchedCachingDataset,
 )
 import traininglib.segmentation.connectedcomponents as concom
+from .cc_postprocessing import remove_small_objects, load_image
 
 
 
@@ -142,19 +143,6 @@ class CC_CellsInference(torch.nn.Module):
         }
 
 
-
-def remove_small_objects(instancemap:torch.Tensor, threshold:int) -> torch.Tensor:
-    assert instancemap.ndim == 2
-    assert instancemap.dtype == torch.int64 or instancemap.dtype == torch.int32
-    
-    labels, counts = torch.unique(instancemap, return_counts=True)
-    good_labels = labels[counts > threshold]
-
-    mask = torch.isin(instancemap, good_labels) & (instancemap != 0)
-    return mask * instancemap
-
-
-
 RawBatch = tp.List[ tp.Tuple[torch.Tensor, torch.Tensor] ]
 
 class CC_CellsTrainStep(modellib.SaveableModule):
@@ -264,12 +252,12 @@ class CC_Cells_CARROT(modellib.SaveableModule):
         imagepath: str, 
         px_per_mm: float,
         batchsize: int = 1,
-        displayshape: tp.Optional[tp.Tuple[int,int]] = None,
+        outputshape: tp.Optional[tp.Tuple[int,int]] = None,
         progress_callback: tp.Optional[tp.Callable[[float],None]] = None
     ):
-        assert displayshape is None or len(displayshape) == 2
+        assert outputshape is None or len(outputshape) == 2
 
-        x = self.load_image(imagepath)
+        x = load_image(imagepath)
         x, grid, n, og_shape = self.module.prepare(x, px_per_mm)
         batch_outputs = []
         for i in range(0, n, batchsize):
@@ -277,54 +265,12 @@ class CC_Cells_CARROT(modellib.SaveableModule):
             batch_outputs.extend(list(batch_output))
             if progress_callback is not None:
                 progress_callback( i/n )
-        if displayshape is None:
-            displayshape = og_shape
+        if outputshape is None:
+            outputshape = og_shape
         raw_output = \
-            self.module.stitch_batch_outputs(batch_outputs, grid, displayshape)
-        output = self.postprocess_output(raw_output, og_shape)
+            self.module.stitch_batch_outputs(batch_outputs, grid, outputshape)
+        output = (raw_output > 0.5).cpu().numpy()[0,0]
         return output
-    
-    def postprocess_output(self, output:torch.Tensor, og_shape:tp.Tuple[int,int]):
-        output = output[0,0]
-        # NOTE: scipy is faster than my current implementation
-        instancemap_np, _ = \
-            scipy.ndimage.label( output.numpy() > 0.5, structure=np.ones([3,3]) )
-        instancemap = torch.as_tensor(instancemap_np)
-        instancemap = remove_small_objects(
-            instancemap, 
-            threshold=self.module.min_object_size_px
-        )
-        # NOTE: not needed with scipy
-        #instancemap = torch.unique(instancemap, return_inverse=True)[1]
 
-        classmap = (output > 0.5)
-        if og_shape != instancemap.shape:
-            classmap_og = datalib.resize_tensor2(
-                classmap[None].float(), 
-                og_shape, 
-                mode='nearest'
-            )[0].to(classmap.dtype)
-            instancemap_og = datalib.resize_tensor2(
-                instancemap[None].float(), 
-                og_shape, 
-                mode='nearest'
-            )[0].to(instancemap.dtype)
-        else:
-            classmap_og = classmap
-            instancemap_og = instancemap
-        
-        return {
-            'classmap':    classmap_og.numpy(),
-            'instancemap': instancemap_og.numpy(),
-            'classmap_for_display':    classmap.numpy(),
-            'instancemap_for_display': instancemap.numpy(),
-        }
 
-    @staticmethod
-    def load_image(imagepath:str) -> torch.Tensor:
-        return torch.as_tensor(
-            np.array(
-                PIL.Image.open(imagepath)
-            )
-        )
 
