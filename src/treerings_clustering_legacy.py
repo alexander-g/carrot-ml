@@ -11,11 +11,34 @@ import skimage.draw
 import skimage.graph        as skgraph
 import scipy.sparse.csgraph as csgraph
 
+from .util import load_image
+
 
 #Helper functions for tree ring clustering and measurement
 
 
-def tree_ring_clustering(x:np.ndarray, **kw):
+class TreeringPostprocessingResult(tp.NamedTuple):
+    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]]
+    ring_labels: tp.List[np.ndarray]
+    ring_areas:  tp.List[float]
+
+
+def postprocess_treeringmapfile(
+    path:     str, 
+    og_shape: tp.Tuple[int,int],
+) -> TreeringPostprocessingResult:
+    treeringmap = np.array(load_image(path, mode='L') > 127)
+    ring_paths  = tree_ring_clustering(treeringmap)
+    ring_labels = associate_boundaries(ring_paths)
+    ring_points = [
+        associate_pathpoints(ring_paths[r0-1], ring_paths[r1-1]) 
+            for r0,r1 in ring_labels
+    ]
+    ring_areas = [treering_area(*rp) for rp in ring_points]
+    return TreeringPostprocessingResult(ring_points, ring_labels, ring_areas)
+
+
+def tree_ring_clustering(x:np.ndarray, **kw) -> tp.List[np.ndarray]:
     '''Find tree ring boundaries in a segmentation output x'''
     assert x.ndim == 2
     paths        = segmentation_to_paths( x > 0 )
@@ -29,6 +52,7 @@ def furthest_point(points:np.ndarray, p:np.ndarray) -> tp.Optional[np.ndarray]:
     if len(points) == 0:
         return None
     
+    # NOTE: argmax should not fail bc points not empty
     i = scipy.spatial.distance_matrix(points, p[np.newaxis]).argmax()
     return points[i]
 
@@ -57,6 +81,7 @@ def closest_point(
     
     dmat = scipy.spatial.distance_matrix(points, p[np.newaxis])
     dmat = np.abs(dmat - d)
+    # NOTE: argmin should not fail bc points not empty
     i    = dmat.argmin()
     return points[i]
 
@@ -140,6 +165,7 @@ def sort_clusters(clusters:tp.List[np.ndarray]) -> tp.List[np.ndarray]:
     A1 = [furthest_point(c, a0) for c    in clusters]
     A2 = [furthest_point(c, a1) for c,a1 in zip(clusters, A1)] # type: ignore
     
+    # TODO: argmax could fail
     longest_axes = np.array([ 
         np.argmax( np.abs(a2-a1) )for a1,a2 in zip(A1,A2)] # type: ignore
     )
@@ -188,6 +214,7 @@ def find_next_boundary(
         if len(intersected) > 0:
             #get the index of the closest point in intersection
             distances = scipy.spatial.distance_matrix(intersected, p0[np.newaxis])
+            # NOTE: argmin should not fail bc intersected not empty
             closest_i = distances.argmin()
             #get the closest point and its label
             sampled_pairs  += [(p0, intersected[closest_i])]
@@ -197,6 +224,7 @@ def find_next_boundary(
         return None
     #take the most common label
     unique_l, unique_counts = np.unique(sampled_labels, return_counts=True)
+    # NOTE: argmax should not fail bc sampled_labels not empty
     next_l = unique_l[unique_counts.argmax()]
     return next_l
 
@@ -245,6 +273,7 @@ def associate_boundaries(paths:tp.List[np.ndarray]) -> tp.List:
     #take the longest chain
     if len(chains)==0:
         return []
+    # NOTE: argmax should not fail because chains not empty
     longest_chain = chains[np.argmax([len(c) for c in chains])]
     return longest_chain
 
@@ -323,6 +352,7 @@ def associate_cells_from_segmentation(
         if len(counts) == 0:
             continue
 
+        # NOTE: argmax should not fail bc counts not empty
         max_label = cell_labels[counts.argmax()]
         ring_map_rgb[slices][cell_mask] = COLORS[max_label%len(COLORS)]
         

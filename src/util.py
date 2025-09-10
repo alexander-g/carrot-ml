@@ -1,25 +1,57 @@
-import tifffile
+import typing as tp
 
+import numpy as np
+import PIL.Image
+import tifffile
 import torch
 
-from traininglib import datalib
+
+# first height, then width
+Shape = tp.Tuple[int,int]
+ImageAndOGShape = tp.Tuple[torch.Tensor, Shape]
 
 
+# NOTE: re-implementing here, to avoid traininglib requirement in carrot
+def load_image(imagepath:str, mode:str='RGB') -> torch.Tensor:
+    return torch.as_tensor(
+        np.array(
+            PIL.Image.open(imagepath).convert(mode)
+        )
+    )
 
-def load_and_scale_image(path:str, scale:float = 1.0) -> torch.Tensor:
+def resize_tensor(
+    x:     torch.Tensor, 
+    shape: Shape, 
+    mode:  str,
+    align_corners: tp.Optional[bool] = None,
+) -> torch.Tensor:
+    assert len(x.shape) in [3,4]
+
+    x0 = x
+    if len(x0.shape) == 3:
+        x = x[np.newaxis]
+    y = torch.nn.functional.interpolate(x, shape, mode=mode, align_corners=align_corners)
+    if len(x0.shape) == 3:
+        y = y[0]
+    return y
+
+
+def load_and_scale_image(path:str, scale:float = 1.0) -> ImageAndOGShape:
     '''Load and scale an image, if a tiff, patchwise to reduce memory'''
     
     if path.endswith('.tiff') or path.endswith('.tif'):
         return load_and_scale_tiff(path, scale)
     else:
-        x   = datalib.load_image(path, to_tensor=True, normalize=False)
+        x   = load_image(path)
+        x   = x.permute(2,0,1)
         H,W = x.shape[-2:]
-        newshape = [ int(H * scale), int(W * scale) ]
-        x = datalib.resize_tensor(x, newshape, 'bilinear')
-        return x
+        newshape = ( int(H * scale), int(W * scale) )
+        x = resize_tensor(x, newshape, 'bilinear')
+        x = x.permute(1,2,0)
+        return x, (H,W)
 
 
-def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> torch.Tensor:
+def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndOGShape:
     '''Load and scale a tiff image, patchwise to reduce memory'''
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
@@ -42,12 +74,13 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> torch.Ten
                 imdata[i:i+patchsize, j:j+patchsize]
             ).permute(2,0,1)
             h,w = patch.shape[-2:]
-            newpatchshape = [ int(h * scale), int(w * scale) ]
-            patch = datalib.resize_tensor(patch, newpatchshape, 'bilinear')
+            newpatchshape = ( int(h * scale), int(w * scale) )
+            patch = resize_tensor(patch, newpatchshape, 'bilinear')
             i_ = int(i*scale)
             j_ = int(j*scale)
             result[:, i_:i_+patch.shape[-2], j_:j_+patch.shape[-1]] = patch
-    return result
+    result = result.permute(1,2,0)
+    return result, (H,W)
 
 
 

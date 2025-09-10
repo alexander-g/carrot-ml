@@ -3,12 +3,25 @@ import typing as tp
 import numpy as np
 import PIL.Image
 import scipy.ndimage
+import skimage.measure as skmeasure
 import torch
 
+from .util import load_image, resize_tensor
 
 
+class CellPostprocessingResult(tp.NamedTuple):
+    classmap_og:     np.ndarray           # bool, [H,W]
+    classmap:        np.ndarray           # bool, [H,W]
+    instancemap:     np.ndarray           # int64 [H,W]
+    instancemap_rgb: np.ndarray           # uint8 [H,W,3]
+    cell_points:     tp.List[np.ndarray]  # list of float64 [N,2], xy
 
-def postprocess_cellmapfile(path:str, *a, **kw):
+class CombinedPostprocessingResult(tp.NamedTuple):
+    cell_info:    tp.List[tp.Dict]
+    ringmap_rgb:  np.ndarray         # uint8 [H,W,3]
+
+
+def postprocess_cellmapfile(path:str, *a, **kw) -> CellPostprocessingResult:
     cellmap = (load_image(path, mode='L') > 127)
     return postprocess_cellmap(cellmap, *a, **kw)
 
@@ -17,7 +30,7 @@ def postprocess_cellmap(
     classmap:  torch.Tensor, 
     og_shape:  tp.Tuple[int,int],
     min_object_size_px: int,
-):
+) -> CellPostprocessingResult:
     assert classmap.ndim  == 2, classmap.shape
     assert classmap.dtype == torch.bool
 
@@ -36,48 +49,168 @@ def postprocess_cellmap(
             og_shape, 
             mode='nearest'
         )[0].to(classmap.dtype)
-        instancemap_og = resize_tensor(
-            instancemap[None].float(), 
-            og_shape, 
-            mode='nearest'
-        )[0].to(instancemap.dtype)
     else:
         classmap_og = classmap
         instancemap_og = instancemap
     
-    instancemap_rgb    = colorize_instancemap(instancemap.numpy())
-    instancemap_og_rgb = colorize_instancemap(instancemap_og.numpy())
-    return {
-        'classmap':    classmap_og.numpy(),
-        'instancemap': instancemap_og_rgb,
-        'classmap_for_display':    classmap.numpy(),
-        'instancemap_for_display': instancemap_rgb,
-    }
+    instancemap_np  = instancemap.numpy()
+    instancemap_rgb = colorize_instancemap(instancemap.numpy())
 
-
-
-def load_image(imagepath:str, mode:str='RGB') -> torch.Tensor:
-    return torch.as_tensor(
-        np.array(
-            PIL.Image.open(imagepath).convert(mode)
-        )
+    cell_points_xy = instancemap_to_cell_points(instancemap.numpy(), og_shape)
+    return CellPostprocessingResult(
+        classmap_og     = classmap_og.numpy(),
+        classmap        = classmap.numpy(),
+        instancemap     = instancemap_np,
+        instancemap_rgb = instancemap_rgb,
+        cell_points     = cell_points_xy,
     )
 
-def resize_tensor(
-    x:    torch.Tensor, 
-    size: tp.Tuple[int,int], 
-    mode: str,
-    align_corners: tp.Optional[bool] = None,
-) -> torch.Tensor:
-    assert len(x.shape) in [3,4]
 
-    x0 = x
-    if len(x0.shape) == 3:
-        x = x[np.newaxis]
-    y = torch.nn.functional.interpolate(x, size, mode=mode, align_corners=align_corners)
-    if len(x0.shape) == 3:
-        y = y[0]
-    return y
+
+def postprocess_cells_and_rings_combined(
+    cell_points_xy: tp.List[np.ndarray], 
+    ring_points_yx: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+    instancemap:    np.ndarray,
+) -> CombinedPostprocessingResult:
+    assert instancemap.ndim == 2 and instancemap.dtype in [np.int64, np.int32]
+
+    # NOTE: ring_points in yx format, for legacy reasons
+    # converting to xy
+    ring_points_xy = [
+        (p0[...,::-1], p1[...,::-1]) for p0,p1 in ring_points_yx
+    ]
+
+    cell_info = associate_cells(cell_points_xy, ring_points_xy)
+    ring_per_cell = np.array([info['year'] for info in cell_info])
+    # safeguard if cell_info is empty
+    ring_per_cell = ring_per_cell.reshape(-1).astype('int64')
+
+    ringmap_rgb   = colorize_cells_per_ring(instancemap, ring_per_cell)
+    return CombinedPostprocessingResult(cell_info, ringmap_rgb)
+
+
+
+def instancemap_to_cell_points(
+    instancemap: np.ndarray, 
+    og_shape:    tp.Optional[tp.Tuple[int,int]] = None,
+) -> tp.List[np.ndarray]:
+    assert instancemap.ndim == 2
+    assert instancemap.dtype in [np.int64, np.int32]
+
+    cell_points_xy = instancemap_to_points(instancemap)
+    if og_shape is not None:
+        og_scale = np.array([
+            instancemap.shape[1] / og_shape[1],
+            instancemap.shape[0] / og_shape[0],
+        ])
+        cell_points_xy = [
+            p / og_scale for p in cell_points_xy
+        ]
+    return cell_points_xy
+
+
+def instancemap_to_points(
+    instancemap: np.ndarray, 
+    scale:       float = 1.0
+) -> tp.List[np.ndarray]:
+    assert instancemap.ndim == 2 and instancemap.dtype in [np.int64, np.int32]
+
+    contours_xy:tp.List[np.ndarray] = []
+    for i, prop in enumerate(skmeasure.regionprops(instancemap), start=1):
+        propslice:tp.Tuple[slice, slice] = prop.slice
+        topleft_xy = propslice[1].start, propslice[0].start
+        instancemask = prop.image_convex
+        # pad to make sure there are zeros at the borders
+        # otherwise will get multiple contours
+        instancemask = np.pad(instancemask, pad_width=1)
+        contour_yx = skmeasure.find_contours(instancemask, fully_connected='high')
+        contour_xy = np.array(contour_yx[0])[...,::-1]
+        contour_xy = contour_xy + topleft_xy -1 # -1 because of np.pad
+        contour_xy = contour_xy * scale
+        contours_xy.append(contour_xy)
+    return contours_xy
+
+
+
+def associate_cells(
+    cell_points: tp.List[np.ndarray], 
+    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
+) -> tp.List[tp.Dict]:
+    '''Assign cells to a ring. All coordinates in xy format.'''
+    if len(cell_points) == 0:
+        return []
+    
+    cell_indices = np.cumsum([len(cell) for cell in cell_points])
+    all_cell_points = np.concatenate(cell_points)
+    # which point is in which ring
+    ring_for_points = -np.ones(len(all_cell_points), dtype=np.int64)
+
+    for i,(p0,p1) in enumerate(ring_points):
+        polygon = np.concatenate([p0,p1[::-1]], axis=0)
+        polygon = skmeasure.approximate_polygon(polygon, tolerance=5)
+
+        in_poly_mask = skmeasure.points_in_poly(all_cell_points, polygon)
+        ring_for_points = np.where(in_poly_mask, i, ring_for_points)
+    
+    cellinfo = []
+    for j, ring_ixs in enumerate(np.split(ring_for_points, cell_indices)[:-1]):
+        uniques, counts = np.unique(ring_ixs, return_counts=True)
+        box_xy = [
+            cell_points[j][:,0].min(),
+            cell_points[j][:,1].min(),
+            cell_points[j][:,0].max(),
+            cell_points[j][:,1].max(),
+        ]
+
+        cellinfo.append({
+            'id':              j,
+            'box_xy':          box_xy,
+            'year':            int(uniques[counts.argmax()]),
+            'area':            polygon_area(cell_points[j]),
+            'position_within': 0.0,  # TODO
+        })
+    return cellinfo
+
+def polygon_area(points: np.ndarray) -> float:
+    '''Compute the area of a polygon given its vertices ordered clockwise.
+       Shoelace formula.'''
+    assert points.ndim == 2 and points.shape[1] == 2
+    
+    shifted_points = np.roll(points, -1, axis=0)
+    # cross product components (determinants)
+    cross_products = (points[:, 0] * shifted_points[:, 1] -
+                      points[:, 1] * shifted_points[:, 0])
+    
+    area = 0.5 * np.abs(np.sum(cross_products))
+    return area
+
+
+def colorize_cells_per_ring(instancemap:np.ndarray, ring_per_cell:np.ndarray):
+    assert instancemap.ndim == 2 and instancemap.dtype in [np.int64, np.int32]
+    assert ring_per_cell.ndim == 1 and ring_per_cell.dtype == np.int64
+
+    COLORS = [
+        #(255,255,255),
+        ( 23,190,207),
+        (255,127, 14),
+        ( 44,160, 44),
+        (214, 39, 40),
+        (148,103,189),
+        (140, 86, 75),
+        (188,189, 34),
+        (227,119,194),
+    ]
+
+    rgb = np.zeros(instancemap.shape+(3,), dtype=np.uint8)
+    for i, ring_idx in enumerate(np.unique(ring_per_cell)):
+        if ring_idx < 0:
+            continue
+        cell_ixs  = np.argwhere(ring_per_cell == ring_idx).ravel() +1
+        cell_mask = np.isin(instancemap, cell_ixs)
+        rgb[cell_mask] = COLORS[i % len(COLORS)]
+    return rgb
+
+
 
 
 def remove_small_objects(instancemap:torch.Tensor, threshold:int) -> torch.Tensor:

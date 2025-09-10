@@ -17,7 +17,8 @@ from traininglib.segmentation import (
     PatchedCachingDataset,
 )
 import traininglib.segmentation.connectedcomponents as concom
-from .cc_postprocessing import remove_small_objects, load_image
+from .util import load_and_scale_image
+from .cc_postprocessing import remove_small_objects
 
 
 
@@ -257,8 +258,13 @@ class CC_Cells_CARROT(modellib.SaveableModule):
     ):
         assert outputshape is None or len(outputshape) == 2
 
-        x = load_image(imagepath)
-        x, grid, n, og_shape = self.module.prepare(x, px_per_mm)
+        # NOTE: scaling down already here for more memory efficient image loading
+        scale = self.module.module.px_per_mm / px_per_mm
+        x, og_shape = load_and_scale_image(imagepath, scale)
+        
+        # image already scaled down, px_per_mm is now 1.0
+        px_per_mm = 1.0
+        x, grid, n, _ = self.module.prepare(x, px_per_mm)
         batch_outputs = []
         for i in range(0, n, batchsize):
             batch_output = self.module.process_batch(x, grid, i, n, batchsize)
