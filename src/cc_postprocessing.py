@@ -201,12 +201,14 @@ def colorize_cells_per_ring(instancemap:np.ndarray, ring_per_cell:np.ndarray):
         (227,119,194),
     ]
 
+    cell_instance_values = np.unique(instancemap)
+
     rgb = np.zeros(instancemap.shape+(3,), dtype=np.uint8)
     for i, ring_idx in enumerate(np.unique(ring_per_cell)):
         if ring_idx < 0:
             continue
-        cell_ixs  = np.argwhere(ring_per_cell == ring_idx).ravel() +1
-        cell_mask = np.isin(instancemap, cell_ixs)
+        cell_ixs  = np.argwhere(ring_per_cell == ring_idx).ravel() + 1
+        cell_mask = np.isin(instancemap, cell_instance_values[cell_ixs])
         rgb[cell_mask] = COLORS[i % len(COLORS)]
     return rgb
 
