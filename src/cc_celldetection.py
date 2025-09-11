@@ -262,8 +262,8 @@ class CC_Cells_CARROT(modellib.SaveableModule):
         scale = self.module.module.px_per_mm / px_per_mm
         x, og_shape = load_and_scale_image(imagepath, scale)
         
-        # image already scaled down, px_per_mm is now 1.0
-        px_per_mm = 1.0
+        # image already scaled down, px_per_mm is now same as module's
+        px_per_mm = self.module.module.px_per_mm
         x, grid, n, _ = self.module.prepare(x, px_per_mm)
         batch_outputs = []
         for i in range(0, n, batchsize):

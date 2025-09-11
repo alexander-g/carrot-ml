@@ -18,9 +18,9 @@ from .util import load_image
 
 
 class TreeringPostprocessingResult(tp.NamedTuple):
-    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]]
-    ring_labels: tp.List[np.ndarray]
-    ring_areas:  tp.List[float]
+    ring_points_yx: tp.List[tp.Tuple[np.ndarray, np.ndarray]]  # yx order
+    ring_labels:    tp.List[np.ndarray]
+    ring_areas:     tp.List[float]
 
 
 def postprocess_treeringmapfile(

@@ -1,25 +1,27 @@
+import os
 import typing as tp
 
 import numpy as np
 import PIL.Image
+import skimage.measure as skmeasure
 import torch
 import torchvision
 
 from traininglib import datalib
+from traininglib import unet
 from traininglib.segmentation import (
-    SegmentationModel, 
-    PatchwiseTrainingTask,
-    Class,
+    PatchedCachingDataset,
     margin_loss_fn,
+    grid_for_patches, 
+    paste_patch, 
+    get_patch_from_grid,
 )
-from traininglib.modellib import BaseModel
+from traininglib.modellib import BaseModel, SaveableModule
 from traininglib.paths.pathdataset import FirstComponentPatchedPathsDataset
 from traininglib.paths import pathutils as utils
+
 from . import treerings_clustering_legacy as treeringlib
-from .cellsmodel import instancemap_to_points
-
-import skimage.measure as skmeasure
-
+from .cc_celldetection import prepare_batch
 from .util import load_and_scale_image
 
 
@@ -32,334 +34,257 @@ def resolution_to_scale(px_per_mm:float) -> float:
 
 
 
-class TreeringDetectionModel(SegmentationModel):
-    def __init__(self, *a, px_per_mm:float, **kw):
-        kw['patchify'] = True
-        super().__init__(
-            *a, 
-            classes  = [Class('ring-boundaries', (255,255,255))], 
-            **kw
+
+# basic semantic segmentation
+# instance segmentation during inference via connected components
+class TreeringsModule(unet.UNet):
+    def __init__(self, **kw):
+        super().__init__(output_channels=1, **kw)
+        self.px_per_mm = HARDCODED_GOOD_RESOLUTION
+
+
+
+RawBatch = tp.List[ tp.Tuple[torch.Tensor, torch.Tensor] ]
+
+class TreeringsTrainStep(SaveableModule):
+    def __init__(self, module:TreeringsModule, inputsize:int):
+        super().__init__()
+        self.module    = module
+        self.inputsize = inputsize
+        self._device_indicator = torch.nn.Parameter(torch.empty(0))
+
+    def forward(self, raw_batch:RawBatch):
+        x,t = prepare_batch(
+            raw_batch,
+            augment   = True,
+            patchsize = self.inputsize,
+            device    = self._device_indicator.device
         )
-        self.px_per_mm = px_per_mm
-        self.scale = resolution_to_scale(px_per_mm)
-    
-    # TODO: profiling, cpu faster than cuda
-    def process_image(self, *a, progress_callback:tp.Optional[tp.Callable] = None, **kw):
-        kw['progress_callback'] = progress_callback
-        return super().process_image(*a,  **kw)
-    
-    def prepare_image(self, image:str|np.ndarray):
-        # NOTE: no normalize because of memory issues
-        # TODO: use tifffile, read patch, resize, repeat
-        if isinstance(image, str):
-            #image = datalib.load_image(image, to_tensor=True, normalize=False)
-            image = load_and_scale_image(image, self.scale)   # type: ignore
-        
-        x = x0 = torch.as_tensor(image)
-        # if self.scale != 1:
-        #     H,W = x.shape[-2:]
-        #     newshape = [ int(H * self.scale), int(W * self.scale) ]
-        #     x = datalib.resize_tensor(x, newshape, 'bilinear')
-        x0 = x    # no resize
-        x  = x.float() / 255
-        if self.patchify:
-            x = datalib.pad_to_minimum_size(x, self.inputsize)
-            x = datalib.slice_into_patches_with_overlap(x, self.inputsize, self.slack)
-            xbatch = [xi[None] for xi in x]
-        else:
-            xbatch = [x]
-        return xbatch, x0
-    
-    def finalize_inference(   # type: ignore [override]
-        self, 
-        raw: tp.List[torch.Tensor], 
-        x:   torch.Tensor,
-    ):
-        segmentation = super().finalize_inference(raw, x).classmap
-        og_size = (x.shape[-1], x.shape[-2])
-        return self.segmentation_to_points(segmentation, og_size)
-    
-    def start_training(self, *a, task_kw={}, **kw):
-        task_kw = {
-            'scale':     self.scale,
-            'inputsize': self.inputsize,
-        } | task_kw
-        return super()._start_training(
-            TreeringDetectionTrainingTask, *a, task_kw=task_kw, **kw
-        )
-    
-    @staticmethod
-    def segmentation_to_points(
-        segmentation: np.ndarray,
-        og_size:      tp.Optional[tp.Tuple[int,int]] = None,
-    ) -> tp.Dict:
-        paths = treeringlib.tree_ring_clustering(segmentation, og_size)
-        ring_labels = treeringlib.associate_boundaries(paths)
-        ring_points = [
-            treeringlib.associate_pathpoints(paths[r0-1], paths[r1-1]) 
-                for r0,r1 in ring_labels
-        ]
-        ring_areas = [treeringlib.treering_area(*rp) for rp in ring_points]
-        return {
-            'segmentation'   : segmentation,
-            'ring_points'    : ring_points,
-            'ring_labels'    : ring_labels,
-            'ring_areas'     : ring_areas,
-        }
-    
-    @classmethod
-    def associate_cells_from_segmentation(
-        cls, 
-        cell_map:    np.ndarray, 
-        ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
-        og_size:     tp.Optional[tp.Tuple[int,int]] = None,
-    ) -> tp.Tuple:
-        '''Assign cells to rings. 
-          If og_size is not None will scale the cell coordinates (but not rings)'''
-        #return treeringlib.associate_cells_from_segmentation(cell_map, ring_points, og_size)
-        cell_map = (cell_map > 0)
-        cell_points, instancemap = classmap_to_cell_points(cell_map, og_size)
-        return cls.associate_cells(cell_points, ring_points, instancemap)
-
-    @staticmethod
-    def associate_cells(
-        cell_points: tp.List[np.ndarray], 
-        ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
-        instancemap: np.ndarray,
-    ):
-        # NOTE: ring_points in yx format, for legacy reasons
-        # converting to xy
-        ring_points = [
-            (p0[...,::-1], p1[...,::-1]) for p0,p1 in ring_points
-        ]
-        cell_info = associate_cells(cell_points, ring_points)
-        ring_per_cell = np.array([info['year'] for info in cell_info])
-        # safeguard
-        ring_per_cell = ring_per_cell.reshape(-1).astype('int64')
-        ringmap_rgb   = colorize_instancemap(instancemap, ring_per_cell)
-        return cell_info, ringmap_rgb
-
-
-
-
-def classmap_to_cell_points(
-    classmap: np.ndarray, 
-    og_size:  tp.Optional[tp.Tuple[int,int]] = None,
-) -> tp.Tuple[tp.List[np.ndarray], np.ndarray]:
-    assert classmap.dtype == np.bool_ and classmap.ndim == 2
-
-    instancemap = skmeasure.label(classmap).astype(np.int64)
-    cell_points = instancemap_to_points(instancemap)
-    if og_size is not None:
-        og_scale = np.array([
-            classmap.shape[1] / og_size[0],
-            classmap.shape[0] / og_size[1],
-        ])
-        cell_points = [
-            p / og_scale for p in cell_points
-        ]
-    return cell_points, instancemap
-
-def associate_cells(
-    cell_points: tp.List[np.ndarray], 
-    ring_points: tp.List[tp.Tuple[np.ndarray, np.ndarray]], 
-) -> tp.List[tp.Dict]:
-    '''Assign cells to a ring. All coordinates in xy format.'''
-    cell_indices = np.cumsum([len(cell) for cell in cell_points])
-    all_cell_points = np.concatenate(cell_points)
-    # which point is in which ring
-    ring_for_points = -np.ones(len(all_cell_points), dtype=np.int64)
-
-    for i,(p0,p1) in enumerate(ring_points):
-        polygon = np.concatenate([p0,p1[::-1]], axis=0)
-        polygon = skmeasure.approximate_polygon(polygon, tolerance=5)
-
-        in_poly_mask = skmeasure.points_in_poly(all_cell_points, polygon)
-        ring_for_points = np.where(in_poly_mask, i, ring_for_points)
-    
-    cellinfo = []
-    for j, ring_ixs in enumerate(np.split(ring_for_points, cell_indices)[:-1]):
-        uniques, counts = np.unique(ring_ixs, return_counts=True)
-        box_xy = [
-            cell_points[j][:,0].min(),
-            cell_points[j][:,1].min(),
-            cell_points[j][:,0].max(),
-            cell_points[j][:,1].max(),
-        ]
-
-        cellinfo.append({
-            'id':              j,
-            'box_xy':          box_xy,
-            'year':            int(uniques[counts.argmax()]),
-            'area':            polygon_area(cell_points[j]),
-            'position_within': 0.0,  # TODO
-        })
-    return cellinfo
-
-def polygon_area(points: np.ndarray) -> float:
-    '''Compute the area of a polygon given its vertices ordered clockwise.
-       Shoelace formula.'''
-    assert points.ndim == 2 and points.shape[1] == 2
-    
-    shifted_points = np.roll(points, -1, axis=0)
-    # cross product components (determinants)
-    cross_products = (points[:, 0] * shifted_points[:, 1] -
-                      points[:, 1] * shifted_points[:, 0])
-    
-    area = 0.5 * np.abs(np.sum(cross_products))
-    return area
-
-
-def colorize_instancemap(instancemap:np.ndarray, ring_per_cell:np.ndarray):
-    assert instancemap.ndim == 2 and instancemap.dtype == np.int64
-    assert ring_per_cell.ndim == 1 and ring_per_cell.dtype == np.int64
-
-    COLORS = [
-        #(255,255,255),
-        ( 23,190,207),
-        (255,127, 14),
-        ( 44,160, 44),
-        (214, 39, 40),
-        (148,103,189),
-        (140, 86, 75),
-        (188,189, 34),
-        (227,119,194),
-    ]
-
-    rgb = np.zeros(instancemap.shape+(3,), dtype=np.uint8)
-    for i, ring_idx in enumerate(np.unique(ring_per_cell)):
-        if ring_idx < 0:
-            continue
-        cell_ixs  = np.argwhere(ring_per_cell == ring_idx).ravel() +1
-        cell_mask = np.isin(instancemap, cell_ixs)
-        rgb[cell_mask] = COLORS[i % len(COLORS)]
-    return rgb
-
-
-
-class TreeringDetectionTrainingTask(PatchwiseTrainingTask):
-    def __init__(self, *a, scale:float, pos_weight:float, margin_weight:float, **kw):
-        super().__init__(*a, **kw)
-        self.scale = scale        
-
-    def create_dataloaders(self, *a, **kw) -> tp.Tuple[tp.Iterable, tp.Iterable|None]:
-        return self._create_dataloaders(
-            FirstComponentPatchedPathsDataset, 
-            *a, 
-            trainpatchfactor = 2, 
-            ds_kw = {'scale': self.scale},
-            **kw,
-        )
-
-    def training_step(self, raw_batch:tp.List):
-        x, t = prepare_batch(raw_batch, 512, augment=True, device=self.device)
-        y  = self.basemodule(x)
+        y = self.module(x)
 
         bce_fn = torch.nn.functional.binary_cross_entropy_with_logits
+        bce    = bce_fn(y, t)
+        mgn    = margin_loss_fn(y, t.bool())
+        loss   = bce + mgn * 0.1
 
-        loss_hm_bce = bce_fn(y, t)
-        loss_hm_mgn = margin_loss_fn(y, t.bool())  * 0.1
-
-        loss = loss_hm_bce + loss_hm_mgn
-        logs = {'bce': float(loss_hm_bce), 'mgn':float(loss_hm_mgn)}
+        recall = (y > 0.0)[t > 0].float().mean()
+        
+        logs = { 'bce': float(bce), 'mgn':float(mgn), 'rec':float(recall) }
         return loss, logs
 
 
 
 
-def prepare_batch(
-    raw_batch: tp.List, 
-    patchsize: int,
-    augment:   bool, 
-    device:    torch.device,
-) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-    all_images_raw  = [item[0] for item in raw_batch]
-    all_paths_np    = [item[1] for item in raw_batch]
+class TreeringsDataset(PatchedCachingDataset):
+    def __init__(
+        self, 
+        splitfile: str, 
+        patchsize: int, 
+        px_per_mm: float, 
+        cachedir:  str = './cache/',
+    ):
+        filepairs = datalib.load_file_pairs(splitfile)
 
-    heatmaptargets = []
-    all_images = []
+        scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
+        super().__init__(filepairs, patchsize, scale, cachedir=cachedir)
+        self.items = self.filepairs
 
-    size = patchsize
-    for inputimage, paths_np in zip(all_images_raw, all_paths_np):
-        paths = [torch.as_tensor(p).float() for p in paths_np]
-        if augment:
-            augmented  = augment_image_and_paths(inputimage, paths, size)
-            inputimage = augmented['inputimage'] # type: ignore
-            paths      = augmented['paths']      # type: ignore
-        else:
-            assert inputimage.ndim == 3 and inputimage.shape[0] == 3
-            h,w = inputimage.shape[-2:]
-        all_images.append(inputimage)
+        targetfiles = [anf for _,anf in filepairs]
+        self.items  = self._preprocess_treeringmaps(filepairs)
+        
+    def _preprocess_treeringmaps(
+        self, 
+        filepairs: tp.List[tp.Tuple[str,str]], 
+    ):
+        '''Perform sanity checks and normalize annotations'''
+        new_cachefile = os.path.join(self.cachedir, 'cachefile2.csv')
+        if os.path.exists(new_cachefile):
+            return datalib.load_file_pairs(new_cachefile)
 
-        heatmap = utils.rasterize_multiple_paths_batched(
-            utils.encode_numpy_paths(paths, 0), 
-            n_batches  = 1, 
-            size       = size, 
-            stepfactor = 2.0,
-        ).float()
-        heatmaptargets.append(heatmap)
+        targetfiles = [anf for _,anf in filepairs]
+        cachedir = os.path.join(self.cachedir, 'targets')
+
+        new_target_patches: tp.List[str] = []
+        for i, anf in enumerate(targetfiles):
+            basename = os.path.basename(anf)
+            output = treeringlib.postprocess_treeringmapfile(anf, (100,100) )
+            paths_yx:tp.List[np.ndarray]  = \
+                [rp[0] for rp in output.ring_points_yx] \
+                + [output.ring_points_yx[-1][1]]
+            
+            # TODO: should check if len(paths) == number of connected components
+            # TODO: will fail if there is only a single ring boundary
+            
+            for j, gridcell in enumerate(self.grids[i].reshape(-1,4)):
+                paths_yx_i = [
+                    (p * self.scale) - gridcell[:2] for p in paths_yx
+                ]
+                paths_xy_i = [ p[:,::-1].copy() for p in paths_yx_i ]
+
+                # re-rasterize to normalize annotations
+                size = (gridcell[-2:] - gridcell[:2])[::-1].tolist()
+                heatmap = utils.rasterize_multiple_paths_batched(
+                    utils.encode_numpy_paths(paths_xy_i, 0), 
+                    n_batches  = 1, 
+                    size       = size, 
+                    stepfactor = 2.0,
+                ).float()[0]
+                heatmap_file = os.path.join(cachedir, basename+f'.{j:03n}.png')
+                datalib.write_image_tensor(heatmap_file, heatmap)
+                new_target_patches.append(heatmap_file)
+
+        # sanity check
+        assert len(new_target_patches) == len(self)
     
-    inputs = torch.stack(all_images).to(device)
-    targets = torch.stack(heatmaptargets).to(device)
-    return inputs, targets
-
-
-
-def augment_image_and_paths(
-    image: torch.Tensor, 
-    paths: tp.List[torch.Tensor],
-    patchsize: int,
-) -> tp.Dict[str, tp.Union[torch.Tensor, tp.List[torch.Tensor]]]:
-    assert image.ndim == 3 and image.shape[0] == 3
-
-    # NOTE: first crop then rotate, for a downstream function
-    image, paths, box = random_crop_image_and_paths(image, paths, patchsize)
-    k     = int(torch.randint(0,4, [1]))
-    image = torch.rot90(image, k, dims=(1,2))
-    imshape = image.shape[-2:]
-    paths  = [datalib.rot90_coordinates(p, imshape, k) for p in paths]
-    jitter = torchvision.transforms.ColorJitter(
-        brightness = (0.7, 1.3),
-        contrast   = (0.7, 1.3),
-        saturation = (0.7, 1.3),
-        hue        = (-0.15, 0.15)
-    )
-    image = jitter(image[None])[0]
-    return {
-        'inputimage': image,
-        'paths':      paths,
-        'cropbox':    box,
-        'rot90_k':    torch.tensor(k),
-    }
-    return image, paths
-
-
-def random_crop_image_and_paths(
-    image: torch.Tensor, 
-    paths: tp.List[torch.Tensor],
-    patchsize:  int,
-    cropfactors:tp.Tuple[float, float] = (0.75, 1.33),
-) -> tp.Tuple[torch.Tensor, tp.List[torch.Tensor], torch.Tensor]:
-    assert image.ndim == 3 and image.shape[0] == 3
-
-    H,W = image.shape[-2:]
-    lo  = patchsize * cropfactors[0]
-    hi  = patchsize * cropfactors[1]
-    h   = int(lo + torch.rand(1) * (hi-lo))
-    w   = int(lo + torch.rand(1) * (hi-lo))
-    y0  = int(torch.rand(1) * (H - h))
-    x0  = int(torch.rand(1) * (W - w))
-
-    cropbox = (x0,y0,w,h)
-    newsize = (patchsize, patchsize)
-    resized_crop = torchvision.transforms.functional.resized_crop
-    mode  = datalib.interpolation_modes['bilinear']
-    image = resized_crop(image[None], y0, x0, h, w, newsize, mode)[0]
+        input_patches = [inf for inf,_ in self.items]
+        new_items     = list( zip(input_patches, new_target_patches) )
+        datalib.save_file_tuples(new_cachefile, new_items)
     
-    new_paths = []
-    for path in paths:
-        new_paths.append(
-            datalib.adjust_coordinates_for_crop(path, cropbox, newsize)
-        )
-    return image, new_paths, torch.tensor(cropbox)
+        return new_items
+    
+    def __getitem__(self, i:int):
+        inputfile, targetfile = self.items[i]
+        input  = datalib.load_image(inputfile)
+        target = datalib.load_image(targetfile, mode='L')
+        return input, target
+
+
+
+#TODO: merge with cells model
+class TreeringsInference(torch.nn.Module):
+    def __init__(self, module:TreeringsModule, patchsize:int):
+        super().__init__()
+        self.module = module
+        self.patchsize = patchsize
+        self.slack = 32                                                         # TODO
+
+        self._device_indicator = torch.nn.Parameter(torch.empty(0))
+
+    def forward(
+        self, 
+        x:         torch.Tensor,
+        px_per_mm: float,
+        batchsize: int = 1
+    ):
+        x, grid, n, og_shape = self.prepare(x, px_per_mm)
+        batch_outputs = []
+        for i in range(0, n, batchsize):
+            batch_output = self.process_batch(x, grid, i, n, batchsize)
+            batch_outputs.extend(list(batch_output))
+        raw_output = self.stitch_batch_outputs(batch_outputs, grid)
+        output     = self.postprocess_output(raw_output)
+        return output
+
+    
+    def prepare(self, x:torch.Tensor, px_per_mm:float):
+        assert x.ndim == 3 and x.shape[-1] == 3 and x.dtype==torch.uint8, \
+            'Input must be a single RGB uint8 image in HWC format'
+        
+        # training resolution vs input resolution ratio
+        scale = self.module.px_per_mm / px_per_mm
+        # original size
+        H,W = x.shape[:2]
+        # working size
+        h,w = int(H*scale), int(W*scale)
+
+        device = self._device_indicator.device
+        x = x.to(device)
+
+        # to f32 CHW
+        x = x.permute(2,0,1) / 255
+        x = datalib.resize_tensor2(x, [h,w], 'bilinear' )
+
+        shape = torch.tensor([h,w])
+        grid  = grid_for_patches(shape, self.patchsize, self.slack)
+        n     = grid.reshape(-1,4).shape[0]
+        
+        return x, grid, n, (H,W)
+    
+    def process_batch(
+        self, 
+        x:    torch.Tensor, 
+        grid: torch.Tensor, 
+        i:    int, 
+        n:    int,
+        batchsize: int
+    ) -> torch.Tensor:
+        x_patches = []
+        for j in range(i, min(i+batchsize, n)):
+            gridcell = grid.reshape(-1,4)[j]
+            x_patch  = get_patch_from_grid(x, grid, torch.tensor(j))
+            x_patches.append(x_patch)
+
+        x_batch = torch.stack(x_patches)
+        output:torch.Tensor = self.module(x_batch)
+        output = output.sigmoid().cpu()
+        return output
+    
+    def stitch_batch_outputs(
+        self,
+        outputs:  tp.List[torch.Tensor], 
+        grid:     torch.Tensor,
+        og_shape: tp.Optional[tp.Tuple[int,int]] = None,
+    ):
+        h = int(grid[-1,-1,-2])
+        w = int(grid[-1,-1,-1])
+        full_output = torch.ones([1,1,h,w])
+        for i,patch in enumerate(outputs):
+            paste_patch(full_output, patch, grid, torch.tensor(i), self.slack)
+
+        if og_shape is not None:
+            full_output = datalib.resize_tensor2(full_output, og_shape, 'bilinear')
+        return full_output
+
+
+
+#TODO: merge with cells model
+class Treerings_CARROT(SaveableModule):
+    def __init__(self, module:TreeringsInference):
+        super().__init__()
+        self.module = module
+        self.requires_grad_(False).eval()
+
+    def process_image(
+        self, 
+        imagepath: str, 
+        px_per_mm: float,
+        batchsize: int = 1,
+        outputshape: tp.Optional[tp.Tuple[int,int]] = None,
+        progress_callback: tp.Optional[tp.Callable[[float],None]] = None
+    ):
+        assert outputshape is None or len(outputshape) == 2
+
+        # NOTE: scaling down already here for more memory efficient image loading
+        scale = self.module.module.px_per_mm / px_per_mm
+        x, og_shape = load_and_scale_image(imagepath, scale)
+        
+        # image already scaled down, px_per_mm is now same as module's
+        px_per_mm = self.module.module.px_per_mm
+        x, grid, n, _ = self.module.prepare(x, px_per_mm)
+        batch_outputs = []
+        for i in range(0, n, batchsize):
+            batch_output = self.module.process_batch(x, grid, i, n, batchsize)
+            batch_outputs.extend(list(batch_output))
+            if progress_callback is not None:
+                progress_callback( i/n )
+        if outputshape is None:
+            outputshape = og_shape
+        raw_output = \
+            self.module.stitch_batch_outputs(batch_outputs, grid, outputshape)
+        output = (raw_output > 0.5).cpu().numpy()[0,0]
+        return output
+
+
+
+
+
+
+
+if __name__ == '__main__':
+    splitfile = '/mnt/d/Wood/2025-09-10_all_rings/splits/000_train.txt'
+    ds = TreeringsDataset(splitfile, patchsize=512, px_per_mm=1000)
+    ds[0]
+
+    print('done')
+
 
