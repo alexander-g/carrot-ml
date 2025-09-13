@@ -6,7 +6,7 @@ import scipy.ndimage
 import skimage.measure as skmeasure
 import torch
 
-from .util import load_image, resize_tensor
+from .util import load_image, resize_tensor, scale_points_xy
 
 
 class CellPostprocessingResult(tp.NamedTuple):
@@ -51,7 +51,6 @@ def postprocess_cellmap(
         )[0].to(classmap.dtype)
     else:
         classmap_og = classmap
-        instancemap_og = instancemap
     
     instancemap_np  = instancemap.numpy()
     instancemap_rgb = colorize_instancemap(instancemap.numpy())
@@ -99,12 +98,9 @@ def instancemap_to_cell_points(
 
     cell_points_xy = instancemap_to_points(instancemap)
     if og_shape is not None:
-        og_scale = np.array([
-            instancemap.shape[1] / og_shape[1],
-            instancemap.shape[0] / og_shape[0],
-        ])
+        shape:tp.Tuple[int,int] = instancemap.shape # type: ignore
         cell_points_xy = [
-            p / og_scale for p in cell_points_xy
+            scale_points_xy(p, shape, og_shape) for p in cell_points_xy
         ]
     return cell_points_xy
 

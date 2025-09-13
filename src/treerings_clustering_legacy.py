@@ -1,9 +1,10 @@
 import typing as tp
 
 import numpy as np
+import PIL.Image
 import scipy
 import skimage
-import PIL.Image
+import torch
 
 import skimage.morphology as skmorph
 import skimage.measure
@@ -11,7 +12,7 @@ import skimage.draw
 import skimage.graph        as skgraph
 import scipy.sparse.csgraph as csgraph
 
-from .util import load_image
+from .util import load_image, resize_tensor, scale_points_yx
 
 
 #Helper functions for tree ring clustering and measurement
@@ -28,10 +29,22 @@ def postprocess_treeringmapfile(
     og_shape: tp.Tuple[int,int],
 ) -> TreeringPostprocessingResult:
     treeringmap = np.array(load_image(path, mode='L') > 127)
-    ring_paths  = tree_ring_clustering(treeringmap)
-    ring_labels = associate_boundaries(ring_paths)
+    ring_paths_yx  = tree_ring_clustering(treeringmap)
+
+    if treeringmap.shape != og_shape:
+        treeringmap_t = torch.as_tensor(treeringmap).float()[None]
+        treeringmap_og = \
+            resize_tensor(treeringmap_t, og_shape, 'nearest').bool().numpy()[0]
+        tshape:tp.Tuple[int,int] = treeringmap.shape # type:ignore
+        ring_paths_yx = [
+            scale_points_yx(p, tshape, og_shape) for p in ring_paths_yx
+        ]
+    else:
+        treeringmap_og = treeringmap
+
+    ring_labels = associate_boundaries(ring_paths_yx)
     ring_points = [
-        associate_pathpoints(ring_paths[r0-1], ring_paths[r1-1]) 
+        associate_pathpoints(ring_paths_yx[r0-1], ring_paths_yx[r1-1]) 
             for r0,r1 in ring_labels
     ]
     ring_areas = [treering_area(*rp) for rp in ring_points]

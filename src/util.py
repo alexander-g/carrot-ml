@@ -83,4 +83,21 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     return result, (H,W)
 
 
+def scale_points_xy(points_xy:np.ndarray, from_shape:Shape, to_shape:Shape) -> np.ndarray:
+    '''Points in XY format, shapes in width-height format'''
+    assert points_xy.ndim == 2 and points_xy.shape[-1] == 2
 
+    scale = np.array([
+        to_shape[1] / from_shape[1],
+        to_shape[0] / from_shape[0],
+    ])
+    return points_xy * scale
+
+
+def scale_points_yx(points_yx:np.ndarray, from_shape:Shape, to_shape:Shape) -> np.ndarray:
+    '''Points in YX format, shapes in width-height format'''
+    assert points_yx.ndim == 2 and points_yx.shape[-1] == 2
+    points_xy = points_yx[:,::-1]
+    scaled_xy = scale_points_xy( points_xy, from_shape, to_shape )
+    scaled_yx = scaled_xy[:,::-1]
+    return scaled_yx
