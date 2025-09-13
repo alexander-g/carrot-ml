@@ -28,11 +28,28 @@ def postprocess_cellmapfile(path:str, *a, **kw) -> CellPostprocessingResult:
 
 def postprocess_cellmap(
     classmap:  torch.Tensor, 
+    workshape: tp.Tuple[int,int],
     og_shape:  tp.Tuple[int,int],
     min_object_size_px: int,
 ) -> CellPostprocessingResult:
     assert classmap.ndim  == 2, classmap.shape
     assert classmap.dtype == torch.bool
+
+    classmap_og = classmap
+    if og_shape != classmap.shape:
+        classmap_og = resize_tensor(
+            classmap[None].float(), 
+            og_shape, 
+            mode='nearest'
+        )[0].to(classmap.dtype)
+    
+    if workshape != classmap.shape:
+        classmap = resize_tensor(
+            classmap[None].float(), 
+            workshape, 
+            mode='nearest'
+        )[0].to(classmap.dtype)
+        
 
     # NOTE: scipy is faster than my own implementation
     instancemap_np, _ = \
@@ -43,14 +60,6 @@ def postprocess_cellmap(
         threshold = min_object_size_px,
     )
 
-    if og_shape != instancemap.shape:
-        classmap_og = resize_tensor(
-            classmap[None].float(), 
-            og_shape, 
-            mode='nearest'
-        )[0].to(classmap.dtype)
-    else:
-        classmap_og = classmap
     
     instancemap_np  = instancemap.numpy()
     instancemap_rgb = colorize_instancemap(instancemap.numpy())

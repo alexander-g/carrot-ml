@@ -19,6 +19,8 @@ from .util import load_image, resize_tensor, scale_points_yx
 
 
 class TreeringPostprocessingResult(tp.NamedTuple):
+    treeringmap:    np.ndarray
+    treeringmap_og: np.ndarray
     ring_points_yx: tp.List[tp.Tuple[np.ndarray, np.ndarray]]  # yx order
     ring_labels:    tp.List[np.ndarray]
     ring_areas:     tp.List[float]
@@ -26,11 +28,18 @@ class TreeringPostprocessingResult(tp.NamedTuple):
 
 def postprocess_treeringmapfile(
     path:     str, 
+    workshape:tp.Tuple[int,int],
     og_shape: tp.Tuple[int,int],
 ) -> TreeringPostprocessingResult:
     treeringmap = np.array(load_image(path, mode='L') > 127)
+    if treeringmap.shape != workshape:
+        treeringmap_t = torch.as_tensor(treeringmap).float()[None]
+        treeringmap = \
+            resize_tensor(treeringmap_t, workshape, 'nearest').bool().numpy()[0]
+
     ring_paths_yx  = tree_ring_clustering(treeringmap)
 
+    treeringmap_og = treeringmap
     if treeringmap.shape != og_shape:
         treeringmap_t = torch.as_tensor(treeringmap).float()[None]
         treeringmap_og = \
@@ -39,8 +48,7 @@ def postprocess_treeringmapfile(
         ring_paths_yx = [
             scale_points_yx(p, tshape, og_shape) for p in ring_paths_yx
         ]
-    else:
-        treeringmap_og = treeringmap
+
 
     ring_labels = associate_boundaries(ring_paths_yx)
     ring_points = [
@@ -48,7 +56,13 @@ def postprocess_treeringmapfile(
             for r0,r1 in ring_labels
     ]
     ring_areas = [treering_area(*rp) for rp in ring_points]
-    return TreeringPostprocessingResult(ring_points, ring_labels, ring_areas)
+    return TreeringPostprocessingResult(
+        treeringmap,
+        treeringmap_og,
+        ring_points, 
+        ring_labels, 
+        ring_areas
+    )
 
 
 def tree_ring_clustering(x:np.ndarray, **kw) -> tp.List[np.ndarray]:
