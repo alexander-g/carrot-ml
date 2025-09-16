@@ -28,11 +28,11 @@ class TreeringPostprocessingResult(tp.NamedTuple):
 
 def postprocess_treeringmapfile(
     path:     str, 
-    workshape:tp.Tuple[int,int],
-    og_shape: tp.Tuple[int,int],
+    workshape:tp.Optional[tp.Tuple[int,int]],
+    og_shape: tp.Optional[tp.Tuple[int,int]],
 ) -> TreeringPostprocessingResult:
     treeringmap = np.array(load_image(path, mode='L') > 127)
-    if treeringmap.shape != workshape:
+    if treeringmap.shape != workshape and workshape is not None:
         treeringmap_t = torch.as_tensor(treeringmap).float()[None]
         treeringmap = \
             resize_tensor(treeringmap_t, workshape, 'nearest').bool().numpy()[0]
@@ -40,7 +40,7 @@ def postprocess_treeringmapfile(
     ring_paths_yx  = tree_ring_clustering(treeringmap)
 
     treeringmap_og = treeringmap
-    if treeringmap.shape != og_shape:
+    if treeringmap.shape != og_shape and og_shape is not None:
         treeringmap_t = torch.as_tensor(treeringmap).float()[None]
         treeringmap_og = \
             resize_tensor(treeringmap_t, og_shape, 'nearest').bool().numpy()[0]
