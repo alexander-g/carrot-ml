@@ -13,6 +13,10 @@ from src.treeringmodel import (
     TreeringsInference, 
     Treerings_CARROT,
 )
+from src.maskrcnn_celldetection import (
+    MaskRCNN_CellsModule,
+    MaskRCNN_Cells_CARROT,
+)
 
 
 def update(args:argparse.Namespace):
@@ -32,6 +36,11 @@ def update(args:argparse.Namespace):
         print(module.load_state_dict(m.module.state_dict()))
         inference = TreeringsInference(module, patchsize=m.inputsize)
         CARROT_cls = Treerings_CARROT
+    elif clsname == 'MaskRCNN_TrainStep':
+        module = MaskRCNN_CellsModule(inputsize=m.inputsize) # type: ignore
+        print(module.load_state_dict(m.module.state_dict()))
+        inference = module
+        CARROT_cls = MaskRCNN_Cells_CARROT
     else:
         assert 0, f'Unknown class: {clsname}'
     
