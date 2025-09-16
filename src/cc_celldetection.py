@@ -222,12 +222,22 @@ def prepare_batch(
 
 
 class CC_CellsDataset(PatchedCachingDataset):
-    def __init__(self, splitfile:str, patchsize:int, px_per_mm:float):
-        filepairs = datalib.load_file_pairs(splitfile)
-
+    def __init__(
+        self, 
+        filepairs: tp.List[tp.Tuple[str,str]], 
+        patchsize: int, 
+        px_per_mm: float, 
+        *a, 
+        **kw
+    ):
         scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
-        super().__init__(filepairs, patchsize, scale)
+        super().__init__(filepairs, patchsize, scale, *a, **kw)
         self.items = self.filepairs
+    
+    @classmethod
+    def from_splitfile(cls, splitfile:str, *a, **kw):
+        filepairs = datalib.load_file_pairs(splitfile)
+        return cls(filepairs, *a, **kw)
     
     def __len__(self):
         return len(self.items)

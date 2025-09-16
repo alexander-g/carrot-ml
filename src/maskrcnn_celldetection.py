@@ -14,6 +14,7 @@ from traininglib.segmentation import (
     paste_patch, 
     get_patch_from_grid,
 )
+from traininglib import trainingloop
 from .cc_celldetection import CC_CellsDataset
 from .util import load_and_scale_image
 
@@ -25,6 +26,20 @@ HARDCODED_GOOD_RESOLUTION = 1000   # px/mm
 HARDCODED_MIN_CELLSIZE_UM = 10
 HARDCODED_MIN_CELLSIZE_PX = \
     HARDCODED_MIN_CELLSIZE_UM * 1000 // HARDCODED_GOOD_RESOLUTION
+
+
+
+HARDCODED_DEFAULT_PATCHSIZE = 800
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -466,31 +481,38 @@ def compute_overlap(
     return overlap_box
 
 
+def start_training_from_carrot(
+    filepairs: tp.List[tp.Tuple[str,str]],
+    cachedir:  str,
+    px_per_mm: float,
+    epochs:    int,
+    progress_callback: tp.Callable[[float], None],
+    finetunemodule: tp.Optional[MaskRCNN_CellsModule] = None,
+) -> MaskRCNN_Cells_CARROT:
+    patchsize = HARDCODED_DEFAULT_PATCHSIZE
+
+    module  = MaskRCNN_CellsModule(patchsize)
+    if finetunemodule is not None:
+        print( module.load_state_dict(finetunemodule.state_dict()) )
+    
+    step    = MaskRCNN_TrainStep(module, inputsize=patchsize)
+    # NOTE: *2 because of cropping augmentations
+    dataset = InstanceDataset(
+        filepairs, 
+        patchsize = patchsize*2, 
+        px_per_mm = px_per_mm,
+        cachedir  = cachedir,
+    )
+
+    ld:tp.Sequence = datalib.create_dataloader( # type: ignore
+        dataset, 
+        batch_size = 8,
+        shuffle    = True,
+        loader_type = 'threaded',
+    )
+    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback, lr=1e-4)
+
+    carrotmodel = MaskRCNN_Cells_CARROT(step.module)
+    return carrotmodel
 
 
-# instancemaps = [output['instances'] for output in raw_]
-# grid = datalib.grid_for_patches(x.shape[-2:], self.inputsize, self.slack)
-# instancemap = \
-#     stitch_and_relabel_instancemaps_from_grid(instancemaps, grid, self.slack)
-
-
-# if __name__ == '__main__':
-#     ds = InstanceDataset('/mnt/d/Wood/2025-09-14_angiocells/splits/000_cells-2025-09-14.txt', patchsize=512*2, px_per_mm=1000)
-
-#     m = MaskRCNN_CellsModule(512)
-#     tstep = MaskRCNN_TrainStep(m, 512)
-
-
-#     batch = [ds[i] for i in range(8)]
-#     import time
-#     t0 = time.time()
-#     x,t = prepare_batch(batch, augment=True, patchsize=512, device='cuda')
-#     t1 = time.time()
-#     print(t1-t0)
-#     print(x.shape)
-
-#     loss, logs = tstep(batch)
-#     print(logs)
-
-
-#     print('done')
