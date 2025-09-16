@@ -107,7 +107,7 @@ class TreeringsDataset(PatchedCachingDataset):
         new_target_patches: tp.List[str] = []
         for i, anf in enumerate(targetfiles):
             basename = os.path.basename(anf)
-            output = treeringlib.postprocess_treeringmapfile(anf, (100,100) )
+            output = treeringlib.postprocess_treeringmapfile(anf, None, None )
             paths_yx:tp.List[np.ndarray]  = \
                 [rp[0] for rp in output.ring_points_yx] \
                 + [output.ring_points_yx[-1][1]]
