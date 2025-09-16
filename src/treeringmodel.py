@@ -319,11 +319,15 @@ def start_training_from_carrot(
     cachedir:  str,
     px_per_mm: float,
     epochs:    int,
-    progress_callback: tp.Callable[[float], None]
+    progress_callback: tp.Callable[[float], None],
+    finetunemodule: tp.Optional[TreeringsModule] = None,
 ) -> Treerings_CARROT:
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
 
     module  = TreeringsModule()
+    if finetunemodule is not None:
+        print( module.load_state_dict(finetunemodule.state_dict()) )
+    
     step    = TreeringsTrainStep(module, inputsize=patchsize)
     # NOTE: *2 because of cropping augmentations
     dataset = TreeringsDataset(
