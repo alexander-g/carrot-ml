@@ -4,6 +4,7 @@ import typing as tp
 import numpy as np
 import PIL.Image
 import skimage.measure as skmeasure
+import skimage.morphology as skmorph
 import torch
 import torchvision
 
@@ -19,6 +20,7 @@ from traininglib.segmentation import (
 from traininglib.modellib import BaseModel, SaveableModule
 from traininglib.paths.pathdataset import FirstComponentPatchedPathsDataset
 from traininglib.paths import pathutils as utils
+from traininglib import trainingloop
 
 from . import treerings_clustering_legacy as treeringlib
 from .cc_celldetection import prepare_batch
@@ -31,6 +33,8 @@ HARDCODED_GOOD_RESOLUTION = 250   # px/mm
 
 def resolution_to_scale(px_per_mm:float) -> float:
     return  HARDCODED_GOOD_RESOLUTION / px_per_mm
+
+HARDCODED_DEFAULT_PATCHSIZE = 512   # px
 
 
 
@@ -78,25 +82,27 @@ class TreeringsTrainStep(SaveableModule):
 class TreeringsDataset(PatchedCachingDataset):
     def __init__(
         self, 
-        splitfile: str, 
+        filepairs: tp.List[tp.Tuple[str,str]], 
         patchsize: int, 
         px_per_mm: float, 
         cachedir:  str = './cache/',
     ):
-        filepairs = datalib.load_file_pairs(splitfile)
-
         scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
         super().__init__(filepairs, patchsize, scale, cachedir=cachedir)
         self.items = self.filepairs
+        self.items = self._preprocess_treeringmaps(self.filepairs)
+    
+    @classmethod
+    def from_splitfile(cls, splitfile:str, *a, **kw):
+        filepairs = datalib.load_file_pairs(splitfile)
+        return cls(filepairs, *a, **kw)
 
-        targetfiles = [anf for _,anf in filepairs]
-        self.items  = self._preprocess_treeringmaps(filepairs)
-        
+    
     def _preprocess_treeringmaps(
         self, 
         filepairs: tp.List[tp.Tuple[str,str]], 
     ):
-        '''Perform sanity checks and normalize annotations'''
+        '''Normalize annotations'''
         new_cachefile = os.path.join(self.cachedir, 'cachefile2.csv')
         if os.path.exists(new_cachefile):
             return datalib.load_file_pairs(new_cachefile)
@@ -107,40 +113,71 @@ class TreeringsDataset(PatchedCachingDataset):
         new_target_patches: tp.List[str] = []
         for i, anf in enumerate(targetfiles):
             basename = os.path.basename(anf)
-            output = treeringlib.postprocess_treeringmapfile(anf, (100,100) )
-            paths_yx:tp.List[np.ndarray]  = \
-                [rp[0] for rp in output.ring_points_yx] \
-                + [output.ring_points_yx[-1][1]]
-            
-            # TODO: should check if len(paths) == number of connected components
-            # TODO: will fail if there is only a single ring boundary
-            
-            for j, gridcell in enumerate(self.grids[i].reshape(-1,4)):
-                paths_yx_i = [
-                    (p * self.scale) - gridcell[:2] for p in paths_yx
-                ]
-                paths_xy_i = [ p[:,::-1].copy() for p in paths_yx_i ]
-
-                # re-rasterize to normalize annotations
-                size = (gridcell[-2:] - gridcell[:2])[::-1].tolist()
-                heatmap = utils.rasterize_multiple_paths_batched(
-                    utils.encode_numpy_paths(paths_xy_i, 0), 
-                    n_batches  = 1, 
-                    size       = size, 
-                    stepfactor = 2.0,
-                ).float()[0]
-                heatmap_file = os.path.join(cachedir, basename+f'.{j:03n}.png')
-                datalib.write_image_tensor(heatmap_file, heatmap)
-                new_target_patches.append(heatmap_file)
-
+            an = datalib.load_image(anf, mode='L')[0] > 0.5
+            skeleton = skmorph.skeletonize(an.numpy())
+            targetfile = os.path.join(cachedir, basename+f'.skel.png')
+            datalib.write_image_tensor(targetfile, torch.as_tensor(skeleton))
+            new_target_patches.append(targetfile)
+        
         # sanity check
         assert len(new_target_patches) == len(self)
     
         input_patches = [inf for inf,_ in self.items]
         new_items     = list( zip(input_patches, new_target_patches) )
         datalib.save_file_tuples(new_cachefile, new_items)
-    
+
         return new_items
+
+
+    # def _preprocess_treeringmaps(
+    #     self, 
+    #     filepairs: tp.List[tp.Tuple[str,str]], 
+    # ):
+    #     '''Perform sanity checks and normalize annotations'''
+    #     new_cachefile = os.path.join(self.cachedir, 'cachefile2.csv')
+    #     if os.path.exists(new_cachefile):
+    #         return datalib.load_file_pairs(new_cachefile)
+
+    #     targetfiles = [anf for _,anf in filepairs]
+    #     cachedir = os.path.join(self.cachedir, 'targets')
+
+    #     new_target_patches: tp.List[str] = []
+    #     for i, anf in enumerate(targetfiles):
+    #         basename = os.path.basename(anf)
+    #         output = treeringlib.postprocess_treeringmapfile(anf, (100,100) )
+    #         paths_yx:tp.List[np.ndarray]  = \
+    #             [rp[0] for rp in output.ring_points_yx] \
+    #             + [output.ring_points_yx[-1][1]]
+            
+    #         # TODO: should check if len(paths) == number of connected components
+    #         # TODO: will fail if there is only a single ring boundary
+            
+    #         for j, gridcell in enumerate(self.grids[i].reshape(-1,4)):
+    #             paths_yx_i = [
+    #                 (p * self.scale) - gridcell[:2] for p in paths_yx
+    #             ]
+    #             paths_xy_i = [ p[:,::-1].copy() for p in paths_yx_i ]
+
+    #             # re-rasterize to normalize annotations
+    #             size = (gridcell[-2:] - gridcell[:2])[::-1].tolist()
+    #             heatmap = utils.rasterize_multiple_paths_batched(
+    #                 utils.encode_numpy_paths(paths_xy_i, 0), 
+    #                 n_batches  = 1, 
+    #                 size       = size, 
+    #                 stepfactor = 2.0,
+    #             ).float()[0]
+    #             heatmap_file = os.path.join(cachedir, basename+f'.{j:03n}.png')
+    #             datalib.write_image_tensor(heatmap_file, heatmap)
+    #             new_target_patches.append(heatmap_file)
+
+    #     # sanity check
+    #     assert len(new_target_patches) == len(self)
+    
+    #     input_patches = [inf for inf,_ in self.items]
+    #     new_items     = list( zip(input_patches, new_target_patches) )
+    #     datalib.save_file_tuples(new_cachefile, new_items)
+    
+    #     return new_items
     
     def __getitem__(self, i:int):
         inputfile, targetfile = self.items[i]
@@ -277,14 +314,35 @@ class Treerings_CARROT(SaveableModule):
 
 
 
+def start_training_from_carrot(
+    filepairs: tp.List[tp.Tuple[str,str]],
+    cachedir:  str,
+    px_per_mm: float,
+    epochs:    int,
+    progress_callback: tp.Callable[[float], None]
+) -> Treerings_CARROT:
+    patchsize = HARDCODED_DEFAULT_PATCHSIZE
 
+    module  = TreeringsModule()
+    step    = TreeringsTrainStep(module, inputsize=patchsize)
+    # NOTE: *2 because of cropping augmentations
+    dataset = TreeringsDataset(
+        filepairs, 
+        patchsize = patchsize*2, 
+        px_per_mm = px_per_mm,
+        cachedir  = cachedir,
+    )
 
+    ld:tp.Sequence = datalib.create_dataloader( # type: ignore
+        dataset, 
+        batch_size = 8,
+        shuffle    = True,
+        loader_type = 'threaded',
+    )
+    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback)
 
-if __name__ == '__main__':
-    splitfile = '/mnt/d/Wood/2025-09-10_all_rings/splits/000_train.txt'
-    ds = TreeringsDataset(splitfile, patchsize=512, px_per_mm=1000)
-    ds[0]
-
-    print('done')
+    inference = TreeringsInference(step.module, patchsize)
+    carrotmodel = Treerings_CARROT(inference)
+    return carrotmodel
 
 
