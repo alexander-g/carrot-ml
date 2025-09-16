@@ -14,7 +14,7 @@ def main(args:args.Namespace):
     module  = TreeringsModule()
     step    = TreeringsTrainStep(module, inputsize=args.inputsize)
     # NOTE: *2 because of cropping augmentations
-    dataset = TreeringsDataset(
+    dataset = TreeringsDataset.from_splitfile(
         args.trainsplit, 
         patchsize = args.inputsize*2, 
         px_per_mm = args.px_per_mm
