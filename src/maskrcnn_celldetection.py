@@ -485,17 +485,18 @@ def start_training_from_carrot(
     filepairs: tp.List[tp.Tuple[str,str]],
     cachedir:  str,
     px_per_mm: float,
-    epochs:    int,
-    progress_callback: tp.Callable[[float], None],
+    epochs:    tp.Optional[int],
+    steps:     tp.Optional[int] = None,
+    progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
     finetunemodule: tp.Optional[MaskRCNN_CellsModule] = None,
 ) -> MaskRCNN_Cells_CARROT:
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
 
-    module  = MaskRCNN_CellsModule(patchsize)
+    module = MaskRCNN_CellsModule(patchsize)
     if finetunemodule is not None:
         print( module.load_state_dict(finetunemodule.state_dict()) )
     
-    step    = MaskRCNN_TrainStep(module, inputsize=patchsize)
+    trainstep = MaskRCNN_TrainStep(module, inputsize=patchsize)
     # NOTE: *2 because of cropping augmentations
     dataset = InstanceDataset(
         filepairs, 
@@ -510,9 +511,10 @@ def start_training_from_carrot(
         shuffle    = True,
         loader_type = 'threaded',
     )
-    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback, lr=1e-4)
+    trainingloop.train(trainstep, ld, epochs=epochs, steps=steps, progress_callback=progress_callback, lr=1e-4)
 
-    carrotmodel = MaskRCNN_Cells_CARROT(step.module)
+    carrotmodel = MaskRCNN_Cells_CARROT(trainstep.module)
     return carrotmodel
+
 
 

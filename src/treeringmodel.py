@@ -318,17 +318,18 @@ def start_training_from_carrot(
     filepairs: tp.List[tp.Tuple[str,str]],
     cachedir:  str,
     px_per_mm: float,
-    epochs:    int,
-    progress_callback: tp.Callable[[float], None],
-    finetunemodule: tp.Optional[TreeringsModule] = None,
+    epochs:    tp.Optional[int],
+    steps:     tp.Optional[int] = None,
+    progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
+    finetunemodule:    tp.Optional[TreeringsModule] = None,
 ) -> Treerings_CARROT:
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
 
-    module  = TreeringsModule()
+    module = TreeringsModule()
     if finetunemodule is not None:
         print( module.load_state_dict(finetunemodule.state_dict()) )
     
-    step    = TreeringsTrainStep(module, inputsize=patchsize)
+    trainstep = TreeringsTrainStep(module, inputsize=patchsize)
     # NOTE: *2 because of cropping augmentations
     dataset = TreeringsDataset(
         filepairs, 
@@ -343,9 +344,9 @@ def start_training_from_carrot(
         shuffle    = True,
         loader_type = 'threaded',
     )
-    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback)
+    trainingloop.train(trainstep, ld, epochs=epochs, steps=steps, progress_callback=progress_callback)
 
-    inference = TreeringsInference(step.module, patchsize)
+    inference = TreeringsInference(trainstep.module, patchsize)
     carrotmodel = Treerings_CARROT(inference)
     return carrotmodel
 
