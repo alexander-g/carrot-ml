@@ -89,7 +89,7 @@ def postprocess_cells_and_rings_combined(
     ]
 
     cell_info = associate_cells(cell_points_xy, ring_points_xy)
-    ring_per_cell = np.array([info['year'] for info in cell_info])
+    ring_per_cell = np.array([info['year_index'] for info in cell_info])
     # safeguard if cell_info is empty
     ring_per_cell = ring_per_cell.reshape(-1).astype('int64')
 
@@ -170,7 +170,7 @@ def associate_cells(
         cellinfo.append({
             'id':              j,
             'box_xy':          box_xy,
-            'year':            int(uniques[counts.argmax()]),
+            'year_index':      int(uniques[counts.argmax()]),
             'area':            polygon_area(cell_points[j]),
             'position_within': 0.0,  # TODO
         })
