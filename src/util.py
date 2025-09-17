@@ -56,8 +56,8 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
         og_shape = page.shape
-        H,W,C = og_shape
-
+    H,W,C = og_shape
+    C = 3 
     newshape = [ C, int(H * scale), int(W * scale) ]
     result = torch.zeros(newshape, dtype=torch.uint8)
 
@@ -78,7 +78,7 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
             patch = resize_tensor(patch, newpatchshape, 'bilinear')
             i_ = int(i*scale)
             j_ = int(j*scale)
-            result[:, i_:i_+patch.shape[-2], j_:j_+patch.shape[-1]] = patch
+            result[:, i_:i_+patch.shape[-2], j_:j_+patch.shape[-1]] = patch[:3]
     result = result.permute(1,2,0)
     return result, (H,W)
 
