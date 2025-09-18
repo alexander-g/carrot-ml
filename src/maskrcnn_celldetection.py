@@ -387,7 +387,8 @@ def relabel_instancemaps(
     adjacency_labels = \
         torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
     relabeled_map1 = _relabel(map1[None,None], overlap_uniques, adjacency_labels)[0,0]
-    unchanged_in_map1 = (map1 == relabeled_map1)
+    #unchanged_in_map1 = (map1 == relabeled_map1)  # wrong!
+    unchanged_in_map1 = ~torch.isin(map1, overlap_uniques[:,1])
     relabeled_map1 = torch.where( 
         (map1 > 0) & unchanged_in_map1, 
         relabeled_map1 + map0.max() + 1, 
