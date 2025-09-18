@@ -51,7 +51,7 @@ class MaskRCNN_CellsModule(torch.nn.Module):
             pretrained = True, 
             progress   = False,
             box_detections_per_img = 250,
-            box_nms_thresh = 0.25,
+            box_nms_thresh = 0.30,
         )
         self.basemodule.transform.min_size = (inputsize,)
         self.basemodule.roi_heads.score_thresh = 0.5
@@ -84,7 +84,8 @@ class MaskRCNN_TrainStep(modellib.SaveableModule):
             raw_batch,
             augment   = True,
             patchsize = self.inputsize,
-            device    = self._device_indicator.device
+            device    = self._device_indicator.device,
+            whiteout_prob = 0.025,
         )
         lossdict = self.module(x, t)
         loss = torch.stack( [*lossdict.values()] ).sum()
@@ -104,6 +105,7 @@ def prepare_batch(
     augment:   bool, 
     patchsize: int,
     device:    torch.device,
+    whiteout_prob: float = 0.0,
 ):
     all_inputs  = []
     all_targets = []
@@ -111,6 +113,13 @@ def prepare_batch(
     for i, item in enumerate(raw_batch):
         x = torch.as_tensor(item[0])
         t = torch.as_tensor(item[1])
+
+        # augmentation: fully white or black image
+        if torch.rand(1) < whiteout_prob:
+            x = x * 0 # all black
+            t = t * 0 # no target
+            if torch.rand(1) < 0.5:
+                x = x + 1 # all white
 
         if augment:
             x, t = datalib.random_crop(

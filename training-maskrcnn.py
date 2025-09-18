@@ -14,7 +14,7 @@ def main(args:args.Namespace):
     module  = MaskRCNN_CellsModule(inputsize=args.inputsize)
     step    = MaskRCNN_TrainStep(module, inputsize=args.inputsize)
     # NOTE: *2 because of cropping augmentations
-    dataset = InstanceDataset(
+    dataset = InstanceDataset.from_splitfile(
         args.trainsplit, 
         patchsize = args.inputsize*2, 
         px_per_mm = args.px_per_mm
