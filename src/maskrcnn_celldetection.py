@@ -395,7 +395,7 @@ def relabel_instancemaps(
     # TODO: this is a simplification, rework this properly
     adjacency_labels = \
         torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
-    relabeled_map1 = _relabel(map1[None,None], overlap_uniques, adjacency_labels)[0,0]
+    relabeled_map1 = relabel(map1, overlap_uniques[:,1], overlap_uniques[:,0])
     #unchanged_in_map1 = (map1 == relabeled_map1)  # wrong!
     unchanged_in_map1 = ~torch.isin(map1, overlap_uniques[:,1])
     relabeled_map1 = torch.where( 
@@ -404,6 +404,23 @@ def relabel_instancemaps(
         relabeled_map1 
     )
     return relabeled_map1
+
+def relabel(
+    instancemap: torch.Tensor,
+    from_labels: torch.Tensor,
+    to_labels:   torch.Tensor,
+) -> torch.Tensor:
+    assert instancemap.ndim == 2 and instancemap.dtype in [torch.int64, torch.int32]
+    assert from_labels.ndim == 1 and from_labels.dtype in [torch.int64, torch.int32]
+    assert to_labels.ndim == 1   and to_labels.dtype in [torch.int64, torch.int32]
+
+    n = int(instancemap.max())
+    new_labels = torch.arange(n+1, dtype=instancemap.dtype, device=instancemap.device)
+    new_labels[from_labels] = to_labels
+    new_instancemap = new_labels[instancemap]
+    return new_instancemap
+
+
 
 
 def stitch_and_relabel_instancemaps_from_grid(
