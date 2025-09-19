@@ -16,6 +16,7 @@ from traininglib.segmentation import (
 )
 from traininglib import trainingloop
 from .cc_celldetection import CC_CellsDataset
+from .cc_postprocessing import delineate_instancemap
 from .util import load_and_scale_image
 
 
@@ -338,24 +339,6 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
         return instancemaps
 
 
-
-max_pool2d = torch.nn.functional.max_pool2d
-def min_pool2d(x, kernel_size, stride=None, padding=0):
-    return -max_pool2d(-x, kernel_size, stride=stride, padding=padding)
-
-def delineate_instancemap(instancemap:torch.Tensor) -> torch.Tensor:
-    '''Convert to a binary mask, making sure no instances touch each other'''
-    assert instancemap.ndim == 2
-
-    x0 = instancemap.float()[None,None]
-    x1 = max_pool2d(x0, kernel_size=3, stride=1, padding=1)
-    x2 = min_pool2d(x0, kernel_size=3, stride=1, padding=1)
-
-    mask0 = (x0 != x1) & (x0 != 0)
-    mask1 = (x0 != x2) & (x2 != 0)
-
-    y = x0 * ~(mask0 | mask1)
-    return (y != 0)[0,0]
 
 
 
