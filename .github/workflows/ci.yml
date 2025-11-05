@@ -1,0 +1,36 @@
+name: CI
+
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13' 
+      
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          make
+
+      - name: pytest
+        run: |
+          pip install -r requirements.frozen.txt
+          pytest
+

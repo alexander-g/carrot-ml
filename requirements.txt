@@ -1,7 +1,7 @@
-numpy==1.26.4
-mypy==1.4.1
-pillow==10.2.0
-scipy==1.12.0
-torch==2.2.1
-torchvision==0.17.1
-#-e git+https://codeberg.org/alexander-g/traininglib@7453971aba0bd40dab0384ab487d391b0a49beca#egg=traininglib
+numpy==2.3.3
+mypy==1.18.2
+pillow==11.3.0
+scipy==1.16.2
+torch==2.9.0
+torchvision==0.24.0
+#-e git+https://codeberg.org/alexander-g/traininglib@6622f24c9a8250e74f8037b9f32c04fffc10d3ee#egg=traininglib
