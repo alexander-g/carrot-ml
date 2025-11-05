@@ -16,7 +16,7 @@ def test_iou_matrix_basic():
         [3, 3, 0]
     ], dtype=torch.int32)
 
-    iou = IoU_matrix(a, b)
+    iou = IoU_matrix(a, b, zero_out_zero=False)
 
     expected = torch.tensor([
         [0.5, 0.0, 0.0, 0.0],
