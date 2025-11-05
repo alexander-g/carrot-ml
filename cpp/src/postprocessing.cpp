@@ -1,0 +1,436 @@
+#include <cmath>
+#include <deque>
+#include <iostream>
+#include <ranges>
+#include <vector>
+#include <utility>
+
+#include "./postprocessing.hpp"
+
+
+
+typedef struct LineCoeffs {
+    // x
+    double a;
+    // y
+    double b;
+    // offset
+    double c;
+} LineCoeffs;
+
+
+
+
+template<typename T>
+std::vector<std::vector<T>> sort_by_length(std::vector<std::vector<T>> x) {
+    std::ranges::sort(x, std::greater{}, &std::vector<T>::size);
+    return x;
+}
+
+const Point INFPOINT = {INFINITY, INFINITY};
+
+
+/** Euclidean distance */
+double distance(const Point& p0, const Point& p1) {
+    const double d0 = p0[0] - p1[0];
+    const double d1 = p0[1] - p1[1];
+    return sqrt(  d0*d0 + d1*d1  );
+}
+
+/** Get points that are at most `distance` away from the reference point */
+Points get_neighborhood(
+    const Points& points, 
+    const Point&  p, 
+    double threshold
+) {
+    Path output;
+    for(const Point& p_i: points)
+        if( distance(p, p_i) < threshold )
+            output.push_back(p_i);
+    return output;
+}
+
+std::optional<Point> average_points(const Points& points) {
+    if(points.size() == 0)
+        return std::nullopt;
+    
+    Point sum = {0,0};
+    for(const Point& p: points){
+        sum[0] += p[0];
+        sum[1] += p[1];
+    }
+    const int n = points.size();
+    return Point{sum[0] / n, sum[1] / n};
+}
+
+std::optional<Point> furthest_point(const Points& points, const Point& p) {
+    if(points.size() == 0)
+        return std::nullopt;
+
+    double max_distance = 0;
+    Point  max_p = p;
+    for(const Point& p_i: points){
+        const double distance_i = distance(p, p_i);
+        if(distance_i > max_distance){
+            max_distance = distance_i;
+            max_p = p_i;
+        }
+    }
+    return max_p;
+}
+
+std::optional<Point> closest_point(const Points& points, const Point& p) {
+    if(points.size() == 0)
+        return std::nullopt;
+
+    double min_distance = INFINITY;
+    std::optional<Point> min_p = std::nullopt;
+    for(const Point& p_i: points){
+        const double distance_i = distance(p, p_i);
+        if(distance_i < min_distance){
+            min_distance = distance_i;
+            min_p = p_i;
+        }
+    }
+    return min_p;
+}
+
+std::vector<double> points_to_point_distances(const Points& points, const Point& p) {
+    std::vector<double> output;
+    for(const Point& p_i: points)
+        output.push_back( distance(p_i, p) );
+    return output;
+}
+
+
+
+
+/** Normalize x to unit length */
+Vector normalize(const Vector& v) {
+    double xlen = distance(v, Vector{0,0});
+    xlen = std::max({xlen, 1e-6});
+    return Vector{v[0] / xlen, v[1] / xlen};
+}
+
+
+/** Compute the coefficients of a line going through the points `p0` and `p1 */
+LineCoeffs line_from_two_points(const Point& p0, const Point& p1) {
+    const Vector direction = normalize( {p0[0] - p1[0], p0[1] - p1[1]} );
+    const Vector ortho  = {direction[1], -direction[0]};
+    const double offset = -(p0[0] * ortho[0] + p0[1] * ortho[1]);
+    return LineCoeffs{ortho[0], ortho[1], offset};
+}
+
+
+/** Compute the coefficients of a line going through an endpoint `p` 
+    of a set of points*/
+std::optional<LineCoeffs> line_from_endpoint(
+    const Point&  p, 
+    const Points& points, 
+    double threshold
+) {
+    const Points nhood = get_neighborhood(points, p, threshold);
+    const auto a0 = average_points(nhood);
+    if(!a0)
+        return std::nullopt;
+    
+    const auto a1 = furthest_point(nhood, a0.value());
+    if(!a1)
+        return std::nullopt;
+    
+    return line_from_two_points(a0.value(), a1.value());
+}
+
+
+
+/** Evaluate the equation ax + by + c. Point expected to be in xy format.*/
+double eval_implicit_equation(const LineCoeffs& coef, const Point& p_xy) {
+    const Vector normcoef = normalize({coef.a, coef.b});
+    return p_xy[0] * normcoef[0]  +  p_xy[1] * normcoef[1]  +  coef.c;
+}
+
+/** Rotate a line by 90° counter-clockwise so that it goes through point `p` */
+LineCoeffs rotate_ccw(const LineCoeffs& coef, const Point& p) {
+    const double a = -coef.b;
+    const double b =  coef.a;
+    const double c = -(p[0] * a  +  p[1] * b);
+    return LineCoeffs{a, b, c};
+}
+
+
+
+/** Approximate two points in a set that are the furthest away from each other */
+std::optional<std::pair<Point, Point>>
+get_endpoints_of_set_of_points(const Points& points) {
+    if(points.size() == 0)
+        return std::nullopt;
+    
+    const Point a0 = {0,0};
+    const Point a1 = furthest_point(points, a0).value();
+    const Point a2 = furthest_point(points, a1).value();
+    return std::pair<Point,Point>{a2, a1};
+}
+
+
+Points project_points_onto_line(const LineCoeffs& coef, const Points& points){
+    Points result;
+    result.reserve(points.size());
+
+    for(const Point& p: points){
+        const double signed_distance = eval_implicit_equation(coef, p);
+        const Vector direction = normalize({coef.a, coef.b});
+
+        result.push_back({
+            p[0] - direction[0] * signed_distance,
+            p[1] - direction[1] * signed_distance
+        });
+    }
+    return result;
+}
+
+
+/** Compute how much distribution `a` is overlapped by `b` */
+std::optional<double> overlap_1d(
+    const std::vector<double>& a, 
+    const std::vector<double>& b
+) {
+    if(a.size() == 0 || b.size() == 0)
+        return std::nullopt;
+    
+    const double a_min = *std::min_element(a.begin(), a.end());
+    const double a_max = *std::max_element(a.begin(), a.end());
+    const double b_min = *std::min_element(b.begin(), b.end());
+    const double b_max = *std::max_element(b.begin(), b.end());
+
+    if(a_min == a_max)
+        return std::nullopt;
+
+    const double overlap_start = std::max(a_min, b_min);
+    const double overlap_end   = std::min(a_max, b_max);
+    const double overlap_len   = std::max(0.0, overlap_end - overlap_start);
+
+    return overlap_len / (a_max - a_min);
+}
+
+
+/** Approximate how much two paths overlap if projected onto each other */
+std::optional<double> max_mutual_overlap(const Path& path0, const Path& path1) {
+    if(path0.size() == 0 || path1.size() == 0)
+        return std::nullopt;
+    
+    const LineCoeffs coef0 = line_from_two_points(path0.front(), path0.back());
+    const LineCoeffs coef1 = line_from_two_points(path1.front(), path1.back());
+
+    const Path path0_on_line_0 = project_points_onto_line(coef0, path0);
+    const Path path1_on_line_0 = project_points_onto_line(coef0, path1);
+    const Path path0_on_line_1 = project_points_onto_line(coef1, path0);
+    const Path path1_on_line_1 = project_points_onto_line(coef1, path1);
+
+    const Point& p0 = path0_on_line_0.front();
+    const Point& p1 = path1_on_line_1.front();
+
+    const auto distances0_on_0 = points_to_point_distances(path0_on_line_0, p0);
+    const auto distances1_on_0 = points_to_point_distances(path1_on_line_0, p0);
+    const auto distances0_on_1 = points_to_point_distances(path0_on_line_1, p1);
+    const auto distances1_on_1 = points_to_point_distances(path1_on_line_1, p1);
+
+    return std::max( 
+        overlap_1d(distances0_on_0, distances1_on_0),
+        overlap_1d(distances1_on_1, distances0_on_1)
+    );
+
+}
+
+
+
+
+
+
+/** Compute which points are within `threshold` from line and `distance` 
+    away in front of `p` */
+Points get_points_in_ray(
+    const LineCoeffs& coef, 
+    const Point&  p, 
+    const Points& points, 
+    double threshold = 50, 
+    double distance  = INFINITY
+) {
+    const LineCoeffs coef_inv = rotate_ccw(coef, p);
+    
+    Points output;
+    for(const Point& p_i: points) {
+        // signed distance from `p` along the line
+        const double signed_distance = eval_implicit_equation(coef_inv, p_i);
+        if(signed_distance < 0 || signed_distance > distance)
+            continue;
+        
+        const double distance_to_line = abs(eval_implicit_equation(coef, p_i));
+        if(distance_to_line > threshold)
+            continue;
+        
+        output.push_back(p_i);
+    }
+    return output;
+}
+
+
+typedef std::vector<Path*> PathPointers;
+
+PathPointers get_paths_in_ray(
+    const LineCoeffs& coef, 
+    const Point& p, 
+          Paths& paths, 
+    double threshold = 50, 
+    double distance  = INFINITY
+) {
+    PathPointers result = {};
+    for(Path& path: paths){
+        const Points inraypoints = 
+            get_points_in_ray(coef, p, path, threshold, distance);
+        if( inraypoints.size() > 0 )
+            result.push_back( &path );
+    }
+    return result;
+}
+
+
+
+/** Concatenate two ranges */
+template<std::ranges::input_range R1, std::ranges::input_range R2>
+auto concat_copy(const R1& a, const R2& b)
+{
+    using T = std::ranges::range_value_t<R1>;
+    std::vector<T> out;
+    out.reserve(std::ranges::size(a) + std::ranges::size(b));
+    out.insert(out.end(), std::ranges::begin(a), std::ranges::end(a));
+    out.insert(out.end(), std::ranges::begin(b), std::ranges::end(b));
+    return out;
+}
+
+
+Path merge_and_reorder(const Path& path0, const Path& path1) {
+    const Point& p0_start = path0.front();
+    const Point& p0_end   = path0.back();
+    const Point& p1_start = path1.front();
+    const Point& p1_end   = path1.back();
+
+    const double d0 = distance(p0_start, p1_start);
+    const double d1 = distance(p0_start, p1_end);
+    const double d2 = distance(p0_end,   p1_start);
+    const double d3 = distance(p0_end,   p1_end);
+
+    const auto distances = {
+        distance(p0_start, p1_start),
+        distance(p0_start, p1_end),
+        distance(p0_end,   p1_start),
+        distance(p0_end,   p1_end)
+    };
+    const auto begin_it  = std::begin(distances);
+    const auto argmin_it = std::min_element(begin_it, std::end(distances));
+    
+    const auto path1_rev = std::views::reverse(path1);
+    return (argmin_it == begin_it    ) ? concat_copy(path1_rev, path0) 
+         : (argmin_it == begin_it + 1) ? concat_copy(path1,     path0)
+         : (argmin_it == begin_it + 2) ? concat_copy(path0,     path1)
+         :                               concat_copy(path0,     path1_rev);
+
+}
+
+template<class T>
+void remove_zero_sized(std::vector<std::vector<T>>& v) {
+    v.erase(
+        std::remove_if(
+            v.begin(), 
+            v.end(),
+            [](const std::vector<T>& inner){ return inner.empty(); }),
+            v.end()
+        );
+}
+
+
+Paths merge_paths(
+    const Paths&      paths, 
+    const ImageShape& imageshape,
+    double max_distance, 
+    int    ray_width, 
+    double max_overlap, 
+    double min_length
+) {
+    Paths sorted_paths = sort_by_length(paths);
+
+    if(max_distance < 1)
+        //relative to image width (normally the smaller side of an image)
+        max_distance *= std::min({imageshape.first, imageshape.second});
+    if(min_length < 1)
+        //relative to image width (normally the smaller side of an image)
+        min_length *= std::min({imageshape.first, imageshape.second});
+
+
+    for(int i = 0; i < sorted_paths.size(); i++) {
+        Path& path = sorted_paths[i];
+        const size_t len = path.size();
+
+        if(len < min_length) { 
+            // discard small paths, set to zero size to make sure it's skipped
+            path.resize(0);
+            continue;
+        }
+
+        std::deque<Point> endpoints{path.front(), path.back()};
+        while( endpoints.size() > 0 ) {
+            const Point e(path.front());
+            endpoints.pop_front();
+
+            std::optional<Path*> closest_suitable_path = std::nullopt;
+            double closest_suitable_path_distance = INFINITY;
+            for(const double d: {len*0.1, len*0.2, len*1.0}){
+                const auto coef = line_from_endpoint(e, path, d);
+                if(!coef)
+                    continue;
+                
+                // get paths that intersect the ray within a threshold
+                PathPointers intersecting_paths = get_paths_in_ray(
+                    coef.value(), 
+                    e, 
+                    sorted_paths, 
+                    /*threshold=*/ray_width, 
+                    /*distance= */max_distance
+                );
+                for(Path* isecpath_p: intersecting_paths){
+                    // ignore candidates that have a large overlap
+                    if( max_mutual_overlap(path, *isecpath_p) > max_overlap )
+                        continue;
+                    
+                    const double path_to_endpoint_distance = 
+                        distance(closest_point(*isecpath_p, e).value_or(INFPOINT), e);
+                    
+                    if(path_to_endpoint_distance < closest_suitable_path_distance) {
+                        closest_suitable_path_distance = path_to_endpoint_distance;
+                        closest_suitable_path = isecpath_p;
+                    }
+                }
+            }
+
+            if(!closest_suitable_path)
+                continue;
+            
+            const Path merged_path =
+                merge_and_reorder(path, *closest_suitable_path.value());
+                
+            sorted_paths[i] = merged_path;
+
+            // #set size to zero to indicate that this path has been processed
+            closest_suitable_path.value()->resize(0);
+            // current path has changed: repeat iteration
+            endpoints = {merged_path.front(), merged_path.back()};
+        }
+    }
+    remove_zero_sized(sorted_paths);
+    return sorted_paths;
+}
+
+
+
+
+
+

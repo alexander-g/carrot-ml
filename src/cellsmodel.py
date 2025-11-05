@@ -159,7 +159,7 @@ def relabel_instancemaps(
     #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
     # TODO: this is a simplification, rework this properly
     adjacency_labels  = torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
-    relabeled_map1    = _relabel(map1, overlap_uniques, adjacency_labels)
+    relabeled_map1    = _relabel(map1[None,None], overlap_uniques, adjacency_labels)[0,0]
     unchanged_in_map1 = (map1 == relabeled_map1)
     relabeled_map1 = torch.where( 
         (map1 > 0) & unchanged_in_map1, 
