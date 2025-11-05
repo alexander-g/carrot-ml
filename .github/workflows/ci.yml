@@ -24,13 +24,13 @@ jobs:
       
       - name: Build
         run: |
-          mkdir build
-          cd build
+          mkdir cpp/build
+          cd cpp/build
           cmake ..
           make
-
+      
       - name: pytest
         run: |
           pip install -r requirements.frozen.txt
-          pytest
+          ./run_tests.sh
 

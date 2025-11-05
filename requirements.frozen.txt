@@ -30,7 +30,7 @@ scipy==1.16.2
 setuptools==70.2.0
 sympy==1.14.0
 tifffile==2025.10.16
-torch==2.9.0+cpu
-torchvision==0.24.0+cpu
--e git+https://codeberg.org/alexander-g/traininglib@6622f24c9a8250e74f8037b9f32c04fffc10d3ee#egg=traininglib
+torch==2.9.0
+torchvision==0.24.0
+-e git+https://github.com/alexander-g/traininglib@9d89dcada6452127da76370965cca30844bbdda2#egg=traininglib
 typing_extensions==4.15.0
