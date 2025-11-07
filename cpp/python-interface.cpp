@@ -26,6 +26,13 @@ py::list merge_paths_py(
     return paths_stdvec_to_numpy(merged_paths);
 }
 
+py::list associate_boundaries_py(const py::list paths_py) {
+    const Paths paths = paths_numpy_to_stdvec(paths_py);
+    const auto chain  = associate_boundaries(paths);
+
+    return vec_pairs_to_pylist(chain);
+}
+
 
 
 
@@ -37,6 +44,12 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         merge_paths_py, 
         py::arg("paths").noconvert(),
         py::arg("imageshape")
+    );
+
+    m.def(
+        "associate_boundaries", 
+        associate_boundaries_py, 
+        py::arg("paths").noconvert()
     );
 }
 

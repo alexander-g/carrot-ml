@@ -1,6 +1,7 @@
 #include <cmath>
 #include <deque>
 #include <iostream>
+#include <list>
 #include <ranges>
 #include <vector>
 #include <utility>
@@ -17,6 +18,8 @@ typedef struct LineCoeffs {
     // offset
     double c;
 } LineCoeffs;
+
+typedef std::pair<int,int> IntPair;
 
 
 
@@ -79,14 +82,19 @@ std::optional<Point> furthest_point(const Points& points, const Point& p) {
     return max_p;
 }
 
-std::optional<Point> closest_point(const Points& points, const Point& p) {
+/** Closest point to `p` at distance `d`. */
+std::optional<Point> closest_point(
+    const Points& points, 
+    const Point&  p,
+    double d = 0.0
+) {
     if(points.size() == 0)
         return std::nullopt;
 
     double min_distance = INFINITY;
     std::optional<Point> min_p = std::nullopt;
     for(const Point& p_i: points){
-        const double distance_i = distance(p, p_i);
+        const double distance_i = std::abs(distance(p, p_i) - d);
         if(distance_i < min_distance){
             min_distance = distance_i;
             min_p = p_i;
@@ -244,6 +252,33 @@ std::optional<double> max_mutual_overlap(const Path& path0, const Path& path1) {
 
 
 
+/** Compute which points are within `threshold` from line and `distance` 
+    away in front of `p`. Returns indices of the points. */
+std::vector<size_t> get_argpoints_in_ray (
+    const LineCoeffs& coef, 
+    const Point&  p, 
+    const Points& points, 
+    double threshold = 50, 
+    double distance  = INFINITY
+) {
+    const LineCoeffs coef_inv = rotate_ccw(coef, p);
+    
+    std::vector<size_t> output;
+    for(size_t i = 0; i < points.size(); i++) {
+        const Point& p_i = points[i];
+        // signed distance from `p` along the line
+        const double signed_distance = eval_implicit_equation(coef_inv, p_i);
+        if(signed_distance < 0 || signed_distance > distance)
+            continue;
+        
+        const double distance_to_line = abs(eval_implicit_equation(coef, p_i));
+        if(distance_to_line > threshold)
+            continue;
+        
+        output.push_back(i);
+    }
+    return output;
+}
 
 
 /** Compute which points are within `threshold` from line and `distance` 
@@ -255,21 +290,14 @@ Points get_points_in_ray(
     double threshold = 50, 
     double distance  = INFINITY
 ) {
-    const LineCoeffs coef_inv = rotate_ccw(coef, p);
+    const std::vector<size_t> indices = 
+        get_argpoints_in_ray(coef, p, points, threshold, distance);
     
     Points output;
-    for(const Point& p_i: points) {
-        // signed distance from `p` along the line
-        const double signed_distance = eval_implicit_equation(coef_inv, p_i);
-        if(signed_distance < 0 || signed_distance > distance)
-            continue;
-        
-        const double distance_to_line = abs(eval_implicit_equation(coef, p_i));
-        if(distance_to_line > threshold)
-            continue;
-        
-        output.push_back(p_i);
-    }
+    output.reserve(indices.size());
+    for(const size_t i: indices)
+        output.push_back(points[i]);
+    
     return output;
 }
 
@@ -430,7 +458,231 @@ Paths merge_paths(
 }
 
 
+template<typename T>
+std::optional<double> mean(std::vector<T> x) {
+    return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
+}
+
+
+template<std::floating_point T = double>
+std::vector<T> linspace(T start, T stop, std::size_t n, bool endpoint=true) {
+    if(n == 0)
+        return {};
+    if(n == 1)
+        return {start};
+    std::vector<T> output;
+    output.reserve(n);
+    T step = endpoint ? (stop - start) / static_cast<T>(n - 1)
+                      : (stop - start) / static_cast<T>(n);
+    for(std::size_t i = 0; i < n; i++)
+        output.push_back(start + step * static_cast<T>(i));
+    if(endpoint)
+        output.back() = stop; // avoid FP drift
+    return output;
+}
+
+template<class T>
+std::optional<T> most_common(const std::vector<T>& v) {
+    if (v.empty()) 
+        return std::nullopt;
+    
+    std::unordered_map<T, size_t> freq;
+    freq.reserve(v.size());
+
+    for(const auto& x : v) 
+        ++freq[x];
+    
+    auto best = std::begin(freq);
+    for (auto it = std::next(std::begin(freq)); it != std::end(freq); it++)
+        if(it->second > best->second)
+            best = it;
+    return best->first;
+}
+
+/** Return unique int values in a std::vector<IntPair */
+std::vector<int> unique_pairs_values(const std::vector<IntPair>& x) {
+    std::unordered_map<int,int> count;
+    count.reserve(x.size()*2);
+    for(const auto& p : x) {
+        count[p.first]++;
+        count[p.second]++;
+    }
+    std::vector<int> result;
+    result.reserve(count.size());
+    for(const auto& kv: count) {
+        if(kv.second == 1) 
+            result.push_back(kv.first);
+    }
+    return result;
+}
 
 
 
+// TODO: not a good implementation, can result in duplicates
+/** Select n roughly equidistant points on a path */
+std::optional<Points> sample_points_on_path(const Path& path, int n) {
+    if(path.size() == 0)
+        return std::nullopt;
+    
+    const Point& a0 = path.front();
+    const Point& a1 = path.back();
+    const double D  = distance(a0, a1);
+
+    Points result;
+    result.reserve(n);
+    for(const double d: linspace(0.0, D, n))
+        // closest point at distance d
+        // NOTE: cannot be std::nullopt bc path not empty
+        result.push_back( closest_point(path, a0, d).value() );
+    
+    return result;
+}
+
+/** Robustly determine the next tree ring boundary relative to the boundary `l` */
+std::optional<int> find_next_boundary(
+    const Paths& paths, 
+    const Path&  path, 
+    bool         reverse
+) {
+    const Points sampled_points = 
+        sample_points_on_path(path, 25+1).value_or(Points{});
+    std::vector<int> sampled_path_indices;
+    
+    for(int i = 0; i < sampled_points.size() - 1; i++){
+        const Point& p0 = sampled_points[reverse? i+1 : i];
+        const Point& p1 = sampled_points[reverse? i : i+1];
+
+        // fit a line
+        const LineCoeffs coef = line_from_two_points(p0, p1);
+        // rotate it by 90 deg
+        const LineCoeffs coef_ortho = rotate_ccw(coef, p0);
+        
+        // find points from other paths that intersect the 90deg line
+        // and note down the path with the closest point
+        std::optional<int> closest_path_index = std::nullopt;
+        double closest_path_distance = INFINITY;
+        for(int j = 0; j < paths.size(); j++){
+            const Path& other_path = paths[j];
+            if(&other_path == &path)
+                continue;
+            
+            const Points intersection_points = 
+                get_points_in_ray(coef_ortho, p0, other_path, /*threshold=*/25);
+            if(intersection_points.size() == 0) 
+                continue;
+            
+            const auto distances = points_to_point_distances(intersection_points, p0);
+            const double closest = 
+                *std::min_element(std::begin(distances), std::end(distances));
+            
+            if(closest < closest_path_distance){
+                closest_path_distance = closest;
+                closest_path_index = j;
+            }
+        }
+        
+        if(closest_path_index)
+            sampled_path_indices.push_back(closest_path_index.value());
+    }
+
+    if(sampled_path_indices.size() == 0)
+        return std::nullopt;
+    
+    // #take the most common path
+    const int most_common_path_index = most_common(sampled_path_indices).value();
+    return most_common_path_index;
+}
+
+
+
+std::vector<IntPair> find_longest_chain(std::vector<IntPair> pairs) {
+    const std::vector<int> endpoints = unique_pairs_values(pairs);
+    
+    // for each endpoint construct a chain of integers
+    std::vector<std::vector<IntPair>> chains;
+    for(const int e: endpoints){
+        int next_index = e;
+        std::vector<IntPair> chain;
+
+        // copy from vector into list, for easier manipulation
+        std::list<IntPair> pairs_list(pairs.begin(), pairs.end());
+        while(!pairs_list.empty()) {
+            bool found = false;
+            for(auto it = pairs_list.begin(); it != pairs_list.end(); it++) {
+                IntPair pair = *it;
+                
+                if(pair.second == next_index)
+                    pair = {pair.second, pair.first};
+                
+                if(pair.first == next_index) {
+                    // NOTE: +1 because of legacy reasons
+                    chain.push_back({pair.first+1, pair.second+1});
+                    it = pairs_list.erase(it);
+                    next_index = pair.second;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if(!found)
+                break; // just in case to avoid infinite loop
+        }
+        if(!chain.empty())
+            chains.push_back(chain);
+    }
+    if(chains.empty())
+        return {};
+
+    // TODO: inefficient
+    const auto longest_chain = sort_by_length(chains).front();
+    return longest_chain;
+}
+
+
+/** Group tree ring boundaries into tuples */
+std::vector<IntPair>  associate_boundaries(const Paths& paths) {
+    if(paths.size() == 0)
+        return {};
+    
+    std::vector<IntPair> pairs;
+    for(int i = 0; i < paths.size(); i++){
+        const Path& this_path = paths[i];
+        const std::optional<int> next_of_this = 
+            find_next_boundary(paths, this_path, /*reverse=*/false);
+        if(!next_of_this)
+            continue;
+        
+        const std::optional<int> prev_of_next = 
+            find_next_boundary(paths, paths[*next_of_this], /*reverse=*/true);
+        if(!prev_of_next)
+            continue;
+
+        // cycle-consistency
+        if(i == prev_of_next.value())
+            pairs.push_back({i, next_of_this.value()});
+    }
+
+    
+    auto longest_chain = find_longest_chain(pairs);
+    if(longest_chain.empty())
+        return {};
+
+    // reverse boundaries if needed, closest to the topleft corner first
+    // NOTE: -1 bc of legacy reasons
+    // TODO: remove
+    const Path& path_first = paths[longest_chain.front().first - 1];
+    const Path& path_last  = paths[longest_chain.back().second - 1];
+    const double meandist0 = 
+        mean( points_to_point_distances(path_first, {0,0}) ).value_or(0.0);
+    const double meandist1 = 
+        mean( points_to_point_distances(path_last, {0,0}) ).value_or(0.0);
+
+    if(meandist0 > meandist1) {
+        std::reverse(longest_chain.begin(), longest_chain.end());
+        for(auto &p : longest_chain) 
+            std::swap(p.first, p.second);
+    }
+
+    return longest_chain;
+}
 

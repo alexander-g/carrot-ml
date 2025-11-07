@@ -24,3 +24,21 @@ def test_merge_paths():
     assert len(out0) == 2
     assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
 
+
+
+def test_associate_boundaries():
+    paths0 = [
+        np.linspace([10,10],  [90,90], 20),
+        np.linspace([210,10], [290,90], 20),
+        np.linspace([110,10], [190,90], 20),
+    ]
+
+    out0 = postp_legacy.associate_boundaries(paths0)
+    out1 = postp.associate_boundaries(paths0)
+
+    print(out0)
+    print(out1)
+    assert len(out0) == len(out1)
+    assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
+
+
