@@ -11,6 +11,7 @@ namespace py = pybind11;
 
 Paths paths_numpy_to_stdvec(py::list paths);
 py::list paths_stdvec_to_numpy(const Paths& paths);
+py::list vec_pairs_to_pylist(const std::vector<std::pair<int,int>>& v);
 
 
 #endif

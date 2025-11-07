@@ -43,3 +43,11 @@ py::list paths_stdvec_to_numpy(const Paths& paths){
     return out;
 }
 
+py::list vec_pairs_to_pylist(const std::vector<std::pair<int,int>>& v) {
+    py::list out;
+    for (const auto &p : v) 
+        out.append(py::make_tuple(p.first, p.second));
+
+    return out;
+}
+
