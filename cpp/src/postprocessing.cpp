@@ -105,8 +105,23 @@ std::optional<Point> closest_point(
 
 std::vector<double> points_to_point_distances(const Points& points, const Point& p) {
     std::vector<double> output;
+    output.reserve(points.size());
     for(const Point& p_i: points)
         output.push_back( distance(p_i, p) );
+    return output;
+}
+
+std::optional<std::vector<double>> paired_distances(
+    const Points& points0, 
+    const Points& points1
+) {
+    if(points0.size() != points1.size())
+        return std::nullopt;
+
+    std::vector<double> output;
+    output.reserve(points0.size());
+    for(int i = 0; i < points0.size(); i++)
+        output.push_back( distance(points0[i], points1[i]) );
     return output;
 }
 
@@ -459,6 +474,15 @@ Paths merge_paths(
 
 
 template<typename T>
+std::vector<T> slice_vector(const std::vector<T>& v, size_t start, size_t len){
+    if(start > v.size()) 
+        start = v.size();
+    const size_t end = std::min(v.size(), start + len);
+    return std::vector<T>(v.begin() + start, v.begin() + end);
+}
+
+
+template<typename T>
 std::optional<double> mean(std::vector<T> x) {
     return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
 }
@@ -685,4 +709,105 @@ std::vector<IntPair>  associate_boundaries(const Paths& paths) {
 
     return longest_chain;
 }
+
+
+
+
+double path_length(const Path& path) {
+    double output = 0.0;
+    if(path.size() < 2)
+        return output;
+    
+    for(int i = 0; i < path.size() - 1; i++)
+        output += distance(path[i], path[i+1]);
+    
+    return output;
+}
+
+Point interpolate_points(const Point& p0, const Point& p1, double alpha) {
+    const Vector direction = {p1[0] - p0[0], p1[1] - p0[1]};
+    return { 
+        p0[0] + direction[0] * alpha, 
+        p0[1] + direction[1] * alpha 
+    };
+}
+
+
+Path resample_path(const Path& path, double step) {
+    if(path.empty())
+        return {};
+    
+    const double totallength = path_length(path);    
+    Path output{path.front()};
+    output.reserve(totallength / step);
+
+    int i = 0;
+    double position_i   = 0.0;
+    double lastposition = 0.0;
+    while(position_i < totallength && i < path.size()-1 ) {
+        const double nextposition = lastposition + step;
+        const double distance_to_next_point = distance(path[i], path[i+1]);
+        const double position_i_plus_1 = position_i + distance_to_next_point;
+        if(position_i_plus_1 < nextposition) {
+            position_i += distance_to_next_point;
+            i++;
+            continue;
+        }
+        //else
+
+        const double alpha = 
+            (nextposition - position_i) / distance_to_next_point;
+        const Point sampled_p = interpolate_points(path[i], path[i+1], alpha);
+        output.push_back(sampled_p);
+        
+        lastposition = nextposition;
+    }
+
+    if( totallength - lastposition > 0.1  )
+        output.push_back(path.back());
+    return output;
+}
+
+
+
+/** Group points from path 0 to corresponding points from path 1 */
+std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1) {
+    const double step = std::min( path_length(path0), path_length(path1) ) / 10;
+    // TODO: how to handle step == 0
+
+    Path resampledpath0 = resample_path(path0, step);
+    Path resampledpath1 = resample_path(path1, step);
+
+    const bool flipped = (resampledpath0.size() < resampledpath1.size());
+    if(flipped)
+        std::swap(resampledpath0, resampledpath1);
+
+
+    // find best offset
+    double best_mean_distance = INFINITY;
+    std::optional<int> best_offset = std::nullopt;
+    for(int i = 0; i < resampledpath0.size() - resampledpath1.size() +1; i++) {
+        const auto slicedpath0 = 
+            slice_vector(resampledpath0, i, resampledpath1.size());
+        const auto distances = paired_distances(slicedpath0, resampledpath1);
+        if(distances){
+            const double mean_distance = *mean( *distances );
+            if(mean_distance < best_mean_distance){
+                best_mean_distance = mean_distance;
+                best_offset = i;
+            }
+        }
+    }
+    // should be always true
+    if(best_offset)
+        resampledpath0 = 
+            slice_vector(resampledpath0, *best_offset, resampledpath1.size());
+
+    if(flipped)
+        std::swap(resampledpath0, resampledpath1);
+
+    return {resampledpath0, resampledpath1};
+}
+
+
 

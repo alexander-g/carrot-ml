@@ -28,5 +28,7 @@ Paths merge_paths(
 /** Group tree ring boundaries into tuples */
 std::vector<std::pair<int,int>> associate_boundaries(const Paths& paths);
 
+/** Group points from path 0 to corresponding points from path 1 */
+std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1);
 
 #endif
