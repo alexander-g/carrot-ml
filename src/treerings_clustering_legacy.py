@@ -658,7 +658,8 @@ def associate_pathpoints(path0, path1) -> tp.Tuple[np.ndarray, np.ndarray]:
     tck1, u1 = scipy.interpolate.splprep(path1.T, k=1, u=u1)
     
     #resample the path equidistantly
-    step     = 64
+    #step     = 64
+    step     = min(path_length(path0), path_length(path1)) / 10
     t0       = np.concatenate( [np.arange(0, u0[-1], step), u0[-1:]] )
     path0    = np.stack(scipy.interpolate.splev(t0, tck0),-1)
     t1       = np.concatenate( [np.arange(0, u1[-1], step), u1[-1:]] )
