@@ -31,6 +31,7 @@ target_include_directories(
   PRIVATE 
   ${eigen_SOURCE_DIR}
 )
+set_target_properties(carrot_postprocessing_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 
 
@@ -53,9 +54,9 @@ pybind11_add_module(
   carrot_postprocessing_ext 
   python-interface.cpp 
   src/pybind-utils.cpp
-  ${LIB_SRC_FILES}
+  #${LIB_SRC_FILES}
 )
-
+target_link_libraries(carrot_postprocessing_ext PRIVATE carrot_postprocessing_core)
 target_include_directories(
   carrot_postprocessing_ext 
   PRIVATE 

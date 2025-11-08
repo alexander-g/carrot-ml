@@ -33,6 +33,19 @@ py::list associate_boundaries_py(const py::list paths_py) {
     return vec_pairs_to_pylist(chain);
 }
 
+std::pair<py_f64_array, py_f64_array> associate_pathpoints_py(
+    const py_f64_array path0_py, 
+    const py_f64_array path1_py
+) {
+    const Path path0 = path_numpy_to_stdvec(path0_py);
+    const Path path1 = path_numpy_to_stdvec(path1_py);
+
+    const auto new_paths = associate_pathpoints(path0, path1);
+    return {
+        path_stdvec_to_numpy(new_paths.first), 
+        path_stdvec_to_numpy(new_paths.second)
+    };
+}
 
 
 
@@ -50,6 +63,13 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         "associate_boundaries", 
         associate_boundaries_py, 
         py::arg("paths").noconvert()
+    );
+
+    m.def(
+        "associate_pathpoints",
+        associate_pathpoints_py,
+        py::arg("path0").noconvert(),
+        py::arg("path1").noconvert()
     );
 }
 

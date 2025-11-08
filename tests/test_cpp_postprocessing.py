@@ -42,3 +42,20 @@ def test_associate_boundaries():
     assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
 
 
+
+def test_associate_pathpoints():
+    path0 = np.linspace([ 10,10], [150,150], 30)
+    path1 = np.linspace([210,10], [300,100], 30)
+
+    out0p0, out0p1 = postp_legacy.associate_pathpoints(path0, path1)
+    out1p0, out1p1 = postp.associate_pathpoints(path0, path1)
+    
+    print(out0p0.shape, out0p1.shape)
+    print(out1p0.shape, out1p1.shape)
+    assert out1p0.shape == out1p1.shape
+    assert out1p0.shape == out0p0.shape
+
+    assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p0, out0p0) ])
+    assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p1, out0p1) ])
+
+
