@@ -59,3 +59,22 @@ def test_associate_pathpoints():
     assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p1, out0p1) ])
 
 
+
+def test_segmentation_to_paths():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[100:-100, 100:200] = 1  # object 0
+    mask[300:-300, 300:400] = 1  # object 1
+    mask[300: 310, 300:450] = 1  # object 1 too
+    mask[250:-250, 500:600] = 1  # object 2
+
+    out0 = postp_legacy.segmentation_to_paths(mask, 0.0)
+    out1 = postp.segmentation_to_paths(mask, 0.0)
+
+    print( [o.shape for o in out0] )
+    print( [o.shape for o in out1] )
+
+    assert len(out1) == len(out0) == 3
+    assert all( [1000 > len(o) > 300 for o in out1] )
+    # not exactly equal
+    #assert all( [len(o0) == len(o1) for o0, o1 in zip(out0, out1)] )
+

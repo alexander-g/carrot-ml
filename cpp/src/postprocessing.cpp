@@ -748,3 +748,156 @@ std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1)
 
 
 
+std::vector<int> path_from_leaf(int leaf, const std::vector<int>& predecessors) {
+    std::vector<int> path{ leaf };
+    while(1){
+        if( leaf < 0 || leaf >= predecessors.size())
+            break;
+
+        leaf = predecessors[leaf];
+        path.push_back(leaf);
+    }
+    return path;
+}
+
+static std::vector<int> combine_paths(
+    std::vector<int> path0,  //copy
+    std::vector<int> path1  // copy
+) {
+    while(path0.back() == path1.back()) {
+        path0.pop_back();
+        path1.pop_back();
+    }
+    
+    const auto path1_rev = std::views::reverse(path1);
+    return concat_copy(path0, path1_rev) ;
+
+}
+
+
+std::optional<std::vector<int>> longest_path_from_dfs_result(const DFS_Result& dfs) {
+    std::vector<std::vector<int>> paths;
+    for(const int leaf: dfs.leaves) {
+        const std::vector<int> path = path_from_leaf(leaf, dfs.predecessors);
+        paths.push_back(path);
+    }
+
+    size_t longest_path_size = 0;
+    std::optional<std::vector<int>> longest_path = std::nullopt;
+    for(const auto& path0: paths)
+        for(const auto& path1: paths){
+            if(&path0 == &path1)
+                continue;
+            
+            const auto combined = combine_paths(path0, path1);
+            if(combined.size() > longest_path_size){
+                longest_path = combined;
+                longest_path_size = combined.size();
+            }
+        }
+    
+
+    return longest_path;
+}
+
+
+
+// def reorient_paths(paths:tp.List[np.ndarray]) -> tp.List[np.ndarray]:
+//     if len(paths) == 0:
+//         return []
+    
+//     directions = np.array([ (p[-1] - p[0]) for p in paths])
+//     max_axes   = np.argmax(np.abs(directions), -1)
+//     ax_unq, ax_cnts = np.unique(max_axes, return_counts=True)
+//     common_axis     = ax_unq[ax_cnts.argmax()]
+
+//     orientations  = np.sign( directions[:, common_axis] )
+//     o_unq, o_cnts = np.unique(orientations, return_counts=True)
+//     common_o      = o_unq[o_cnts.argmax()]
+//     new_paths     = [ 
+//         p if o == common_o else p[::-1] for p,o in zip(paths, orientations) 
+//     ]
+//     return new_paths
+
+
+std::vector<Indices2D> reorient_paths(const std::vector<Indices2D>& paths) {
+    if(paths.size() == 0)
+        return {};
+    
+    std::vector<Indices2D> valid_paths;
+    std::vector<Vector> directions;
+    std::vector<int> largest_axes;
+    for(const Indices2D& path: paths) {
+        if(path.size() < 2)
+            continue;
+        
+        valid_paths.push_back(path);
+        const Vector direction{ 
+            (double)path.front().i - path.back().i, 
+            (double)path.front().j - path.back().j
+        };
+        directions.push_back(direction);
+
+        const int largest_axis = (direction[0] > direction[1])? 0 : 1;
+        largest_axes.push_back(largest_axis);
+    }
+    if(largest_axes.empty())
+        return {};
+    
+    const int common_axis = most_common(largest_axes).value();
+
+    std::vector<int> orientations;
+    for(const Vector& direction: directions)
+        orientations.push_back( std::copysign(1, direction[common_axis]) );
+    
+    const int common_orientation = most_common(orientations).value();
+    
+    std::vector<Indices2D> new_paths;
+    for(int i = 0; i < valid_paths.size(); i++) {
+        Indices2D& path = valid_paths[i];
+        if(orientations[i] == common_orientation)
+            std::reverse(path.begin(), path.end());
+
+        new_paths.push_back( path );
+    }
+    return new_paths;
+}
+
+
+std::vector<Index2D> gather_path_coordinates(
+    const std::vector<int>&     path,
+    const std::vector<Index2D>& coordinates
+) {
+    std::vector<Index2D> path_coordinates;
+    for(const int i: path)
+        path_coordinates.push_back(coordinates[i]);
+    return path_coordinates;
+}
+
+
+std::vector<Indices2D> segmentation_to_paths(
+    const EigenBinaryMap& mask, 
+    double min_length
+) {
+    const EigenBinaryMap skeleton = skeletonize(mask);
+    const CCResult ccresult = connected_components(skeleton);
+
+    // if(ccresult.n_labels == 0)
+        // ?
+    
+    if(min_length < 1.0){
+        // relative to image width (normally the smaller side of an image)
+        min_length *= std::min({mask.dimension(0), mask.dimension(1)});
+    }
+
+    std::vector<Indices2D> paths;
+    for(const auto& dfs: ccresult.dfs_results){
+        const auto path = longest_path_from_dfs_result(dfs);
+        if(path && path->size() > 1 && path->size() > min_length)
+            paths.push_back(  gather_path_coordinates(*path, dfs.visited)  );
+    }
+
+    const std::vector<Indices2D> reoriented_paths = reorient_paths(paths);
+    return reoriented_paths;
+}
+

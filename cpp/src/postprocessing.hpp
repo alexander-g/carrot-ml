@@ -31,4 +31,11 @@ std::vector<std::pair<int,int>> associate_boundaries(const Paths& paths);
 /** Group points from path 0 to corresponding points from path 1 */
 std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1);
 
+/** Skeletonize and vectorize boundaries  */
+std::vector<Indices2D> segmentation_to_paths(
+    const EigenBinaryMap& mask, 
+    double min_length
+);
+
+
 #endif

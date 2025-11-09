@@ -8,6 +8,8 @@
 
 namespace py = pybind11;
 typedef py::array_t<double, py::array::c_style | py::array::forcecast> py_f64_array;
+typedef py::array_t<bool, py::array::c_style | py::array::forcecast> py_bool_array;
+
 
 /** ndarray of shape [N,2] to std::vector<std::pair<double,double>> */
 Path  path_numpy_to_stdvec(const py_f64_array& a);

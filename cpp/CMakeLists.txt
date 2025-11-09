@@ -20,6 +20,7 @@ include(FetchContent)
 
 
 add_subdirectory(./wasm-morpho EXCLUDE_FROM_ALL)
+set_target_properties(morpho_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 
 add_library(carrot_postprocessing_core STATIC 
@@ -54,9 +55,10 @@ pybind11_add_module(
   carrot_postprocessing_ext 
   python-interface.cpp 
   src/pybind-utils.cpp
-  #${LIB_SRC_FILES}
+  wasm-morpho/src/pybind-utils.cpp
 )
 target_link_libraries(carrot_postprocessing_ext PRIVATE carrot_postprocessing_core)
+target_link_libraries(carrot_postprocessing_ext PRIVATE morpho_core)
 target_include_directories(
   carrot_postprocessing_ext 
   PRIVATE 
