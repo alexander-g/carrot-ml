@@ -765,7 +765,7 @@ static std::vector<int> combine_paths(
     std::vector<int> path0,  //copy
     std::vector<int> path1  // copy
 ) {
-    while(path0.back() == path1.back()) {
+    while(!path0.empty() && path1.empty() && path0.back() == path1.back()) {
         path0.pop_back();
         path1.pop_back();
     }
