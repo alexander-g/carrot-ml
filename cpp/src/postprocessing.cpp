@@ -851,8 +851,12 @@ std::vector<Index2D> gather_path_coordinates(
     const std::vector<Index2D>& coordinates
 ) {
     std::vector<Index2D> path_coordinates;
-    for(const int i: path)
+    for(const int i: path){
+        if( i < 0 )
+            continue;
+        // TODO: how to handle i > coordinates.size()?
         path_coordinates.push_back(coordinates[i]);
+    }
     return path_coordinates;
 }
 

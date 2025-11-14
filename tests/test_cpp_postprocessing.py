@@ -81,6 +81,8 @@ def test_segmentation_to_paths():
     assert all( [1000 > len(o) > 300 for o in out1] )
     # not exactly equal
     #assert all( [len(o0) == len(o1) for o0, o1 in zip(out0, out1)] )
+    # actual bug
+    assert all( (o1 < 1000).all() for o1 in out1)
 
 
 
@@ -114,6 +116,12 @@ def test_postprocess_treeringmapfile():
 
     assert PIL.Image.open( io.BytesIO(out1['treeringmap_workshape_png']) ).size == workshape
     #assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
+
+
+def test_postprocess_treeringmapfile2():
+    imgf2 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap0.png' )
+    out2 = postp.postprocess_treeringmapfile(imgf2, (2700,3375), (2048,2048))
+    assert len(out2['ring_points_xy']) == 5
 
     assert 0
 
