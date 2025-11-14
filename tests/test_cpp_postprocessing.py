@@ -1,7 +1,11 @@
+import io
+import os
 import sys
 sys.path.insert(0,'cpp/build/')
+import tempfile
 
 import numpy as np
+import PIL.Image
 
 import carrot_postprocessing_ext as postp
 from src import treerings_clustering_legacy as postp_legacy
@@ -77,4 +81,40 @@ def test_segmentation_to_paths():
     assert all( [1000 > len(o) > 300 for o in out1] )
     # not exactly equal
     #assert all( [len(o0) == len(o1) for o0, o1 in zip(out0, out1)] )
+
+
+
+def test_postprocess_treeringmapfile():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10:-10, 100:110] = 1
+    mask[50:-50, 200:250] = 1
+    mask[10:-10, 300:350] = 1
+    mask[10:-10, 600:605] = 1
+    mask[10:-10, 800] = 1
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (555,555)
+    og_shape  = mask.shape
+    out0 = postp_legacy.postprocess_treeringmapfile(maskf, workshape, og_shape)
+    print([ (x0.mean(0), x1.mean(0)) for x0,x1 in out0.ring_points_yx])
+    print([ (x0.shape, x1.shape) for x0,x1 in out0.ring_points_yx])
+
+    out1 = postp.postprocess_treeringmapfile(maskf, workshape, og_shape)
+    print([ (x0.mean(0), x1.mean(0)) for x0,x1 in out1['ring_points_xy']])
+    print([ (x0.shape, x1.shape) for x0,x1 in out1['ring_points_xy']])
+
+    assert len(out0.ring_points_yx) == len(out1['ring_points_xy'])
+    assert all([ 
+        (out0x0.shape == out1x0.shape and out0x1.shape == out1x1.shape)   
+            for ([out0x0, out0x1], [out1x0, out1x1]) 
+                in zip(out0.ring_points_yx, out1['ring_points_xy'])  
+    ])
+
+    assert PIL.Image.open( io.BytesIO(out1['treeringmap_workshape_png']) ).size == workshape
+    #assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
+
+    assert 0
+
 

@@ -1,3 +1,6 @@
 [submodule "cpp/wasm-morpho"]
 	path = cpp/wasm-morpho
-	url = git@github.com:alexander-g/wasm-morpho
+	url = https://github.com/alexander-g/wasm-morpho
+[submodule "cpp/wasm-big-image"]
+	path = cpp/wasm-big-image
+	url = https://github.com/alexander-g/wasm-big-image

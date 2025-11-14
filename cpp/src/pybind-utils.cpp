@@ -59,3 +59,20 @@ py::list vec_pairs_to_pylist(const std::vector<std::pair<int,int>>& v) {
     return out;
 }
 
+py::list vec_paired_paths_to_numpy(const PairedPaths& pp) {
+    py::list out;
+    for(const auto& pathpair: pp )
+        out.append( 
+            py::make_tuple( 
+                path_stdvec_to_numpy(pathpair.first),
+                path_stdvec_to_numpy(pathpair.second)
+            ) 
+        );
+
+    return out;
+}
+
+
+py::bytes buffer_to_bytes(const Buffer& b) {
+    return py::bytes((const char*)b.data, (size_t)b.size);
+}

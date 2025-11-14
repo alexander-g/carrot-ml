@@ -7,7 +7,11 @@
 #include <utility>
 
 #include "./postprocessing.hpp"
+
+#include "./image-utils.hpp"
 #include "./utils.hpp"
+
+#include "../wasm-big-image/src/png-io.hpp"
 
 
 
@@ -576,8 +580,7 @@ std::vector<IntPair> find_longest_chain(std::vector<IntPair> pairs) {
                     pair = {pair.second, pair.first};
                 
                 if(pair.first == next_index) {
-                    // NOTE: +1 because of legacy reasons
-                    chain.push_back({pair.first+1, pair.second+1});
+                    chain.push_back({pair.first, pair.second});
                     it = pairs_list.erase(it);
                     next_index = pair.second;
                     found = true;
@@ -629,10 +632,8 @@ std::vector<IntPair>  associate_boundaries(const Paths& paths) {
         return {};
 
     // reverse boundaries if needed, closest to the topleft corner first
-    // NOTE: -1 bc of legacy reasons
-    // TODO: remove
-    const Path& path_first = paths[longest_chain.front().first - 1];
-    const Path& path_last  = paths[longest_chain.back().second - 1];
+    const Path& path_first = paths[longest_chain.front().first];
+    const Path& path_last  = paths[longest_chain.back().second];
     const double meandist0 = 
         mean( points_to_point_distances(path_first, {0,0}) ).value_or(0.0);
     const double meandist1 = 
@@ -708,7 +709,7 @@ Path resample_path(const Path& path, double step) {
 
 
 /** Group points from path 0 to corresponding points from path 1 */
-std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1) {
+PathPair associate_pathpoints(const Path& path0, const Path& path1) {
     const double step = std::min( path_length(path0), path_length(path1) ) / 10;
     // TODO: how to handle step == 0
 
@@ -801,25 +802,6 @@ std::optional<std::vector<int>> longest_path_from_dfs_result(const DFS_Result& d
 }
 
 
-
-// def reorient_paths(paths:tp.List[np.ndarray]) -> tp.List[np.ndarray]:
-//     if len(paths) == 0:
-//         return []
-    
-//     directions = np.array([ (p[-1] - p[0]) for p in paths])
-//     max_axes   = np.argmax(np.abs(directions), -1)
-//     ax_unq, ax_cnts = np.unique(max_axes, return_counts=True)
-//     common_axis     = ax_unq[ax_cnts.argmax()]
-
-//     orientations  = np.sign( directions[:, common_axis] )
-//     o_unq, o_cnts = np.unique(orientations, return_counts=True)
-//     common_o      = o_unq[o_cnts.argmax()]
-//     new_paths     = [ 
-//         p if o == common_o else p[::-1] for p,o in zip(paths, orientations) 
-//     ]
-//     return new_paths
-
-
 std::vector<Indices2D> reorient_paths(const std::vector<Indices2D>& paths) {
     if(paths.size() == 0)
         return {};
@@ -875,15 +857,27 @@ std::vector<Index2D> gather_path_coordinates(
 }
 
 
-std::vector<Indices2D> segmentation_to_paths(
+Paths indices_to_points(std::vector<Indices2D> indicesvector) {
+    Paths output;
+    for(const Indices2D& indices: indicesvector){
+        Path path;
+        for(const Index2D& index: indices)
+            // yx to xy
+            path.push_back({ (double)index.j, (double)index.i });
+        
+        output.push_back(path);
+    }
+    return output;
+}
+
+
+Paths segmentation_to_paths(
     const EigenBinaryMap& mask, 
     double min_length
 ) {
     const EigenBinaryMap skeleton = skeletonize(mask);
     const CCResult ccresult = connected_components(skeleton);
 
-    // if(ccresult.n_labels == 0)
-        // ?
     
     if(min_length < 1.0){
         // relative to image width (normally the smaller side of an image)
@@ -898,6 +892,100 @@ std::vector<Indices2D> segmentation_to_paths(
     }
 
     const std::vector<Indices2D> reoriented_paths = reorient_paths(paths);
-    return reoriented_paths;
+    return indices_to_points(reoriented_paths);
 }
+
+
+template<typename T>
+uint8_t* to_uint8_p(T* p) {
+    static_assert( sizeof(T) == sizeof(uint8_t) );
+    return (uint8_t*) p;
+}
+
+
+/** Rescale points from one image shape to another.
+    Points are expected to be in XY format, shapes in HW. */
+Points scale_points(
+    const Points& points_xy, 
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape
+) {
+    const std::pair<double, double> scale = {
+        to_shape.first  / (double)from_shape.first,    // height
+        to_shape.second / (double)from_shape.second    // width
+    };
+    Points output;
+    for(const Point& point: points_xy)
+        output.push_back({point[0] * scale.second, point[1] * scale.first});
+    return output;
+}
+
+Paths scale_paths(
+    const Paths& paths, 
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape
+) {
+    Paths output;
+    for(const Path& path: paths)
+        output.push_back( scale_points(path, from_shape, to_shape) );
+    return output;
+}
+
+
+std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
+    size_t      filesize,
+    const void* read_file_callback_p,
+    const void* read_file_handle,
+    const ImageShape& workshape,
+    const ImageShape& og_shape
+) {
+    // if not png: error?
+
+    const auto mask_x = load_and_resize_binary_png(
+        filesize, 
+        read_file_callback_p, 
+        read_file_handle,
+        workshape.first,
+        workshape.second
+    );
+    if(!mask_x)
+        return std::nullopt;
+    
+    const EigenBinaryMap& mask = mask_x.value();
+
+    const Paths simple_paths = segmentation_to_paths(mask, 0.0);
+          Paths merged_paths = merge_paths(simple_paths, workshape);
+
+    if(og_shape != workshape)
+        merged_paths = scale_paths(merged_paths, workshape, og_shape);
+
+    const std::vector<IntPair> ring_labels = associate_boundaries(merged_paths);
+    PairedPaths paired_paths;
+    for(const IntPair& labelpair: ring_labels)
+        paired_paths.push_back(
+            associate_pathpoints(
+                merged_paths[labelpair.first], 
+                merged_paths[labelpair.second]
+            )
+        );
+    
+    // ring_points = [
+    //     associate_pathpoints(ring_paths_yx[r0-1], ring_paths_yx[r1-1]) 
+    //         for r0,r1 in ring_labels
+    // ]
+    // ring_areas = [treering_area(*rp) for rp in ring_points]
+
+    const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
+        png_compress_binary_image(to_uint8_p(mask.data()), workshape.second, workshape.first);
+    if(!treeringmap_workshape_png_x)
+        return std::nullopt;
+
+    // return {data_encoded_workshape, data_encoded_og_shape, ring_points, ring_labels, ring_areas};
+
+    return TreeringsPostprocessingResult{
+        /*treeringmap_workshape_png = */ treeringmap_workshape_png_x.value(),
+        /*ring_points_xy = */ paired_paths
+    };
+}
+
 

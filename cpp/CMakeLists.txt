@@ -8,6 +8,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 
 set(LIB_SRC_FILES
+    src/image-utils.cpp
     src/postprocessing.cpp
 )
 
@@ -21,6 +22,10 @@ include(FetchContent)
 
 add_subdirectory(./wasm-morpho EXCLUDE_FROM_ALL)
 set_target_properties(morpho_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_subdirectory(./wasm-big-image EXCLUDE_FROM_ALL)
+set_target_properties(wasm_png PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(png_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 
 add_library(carrot_postprocessing_core STATIC 
@@ -59,6 +64,7 @@ pybind11_add_module(
 )
 target_link_libraries(carrot_postprocessing_ext PRIVATE carrot_postprocessing_core)
 target_link_libraries(carrot_postprocessing_ext PRIVATE morpho_core)
+target_link_libraries(carrot_postprocessing_ext PRIVATE wasm_png)
 target_include_directories(
   carrot_postprocessing_ext 
   PRIVATE 
