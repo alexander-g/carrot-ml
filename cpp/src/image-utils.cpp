@@ -63,3 +63,53 @@ std::expected<EigenBinaryMap, int> load_and_resize_binary_png(
 
 
 
+
+EigenBinaryMap downsample_2x2(const EigenBinaryMap& x) {
+    EigenBinaryMap output(x.dimension(0)/2, x.dimension(1)/2);
+    for(int i = 0; i < output.dimension(0); i++)
+        for(int j = 0; j < output.dimension(1); j++)
+            output(i,j) = (
+                (
+                    (float) x(i*2,   j*2  ) + 
+                    (float) x(i*2+1, j*2  ) + 
+                    (float) x(i*2  , j*2+1) + 
+                    (float) x(i*2+1, j*2+1)
+                ) / 4
+            ) > 0;
+    return output;
+}
+
+
+// 1GB ~ 16k x 16k rgba
+const int MAX_ACCEPTABLE_MEMORY = 1024*1024*1024;
+
+std::expected<EigenBinaryMap, int> load_and_resize_binary_png2(
+    size_t      filesize,
+    const void* read_file_callback_p,
+    const void* read_file_handle,
+    int   dst_width,
+    int   dst_height
+) {
+    bool need_to_downsample = false;
+    if((dst_width*2) * (dst_height*2) * 4 <= MAX_ACCEPTABLE_MEMORY) {
+        dst_width = dst_width*2;
+        dst_height = dst_height*2;
+        need_to_downsample = true;
+    }
+
+    const auto output_x = load_and_resize_binary_png(
+        filesize, 
+        read_file_callback_p, 
+        read_file_handle, 
+        dst_width, 
+        dst_height
+    );
+    if(!output_x)
+        return output_x;
+    EigenBinaryMap output = std::move(output_x.value());
+
+    if(need_to_downsample)
+        output = downsample_2x2(output);
+    return output;
+}
+

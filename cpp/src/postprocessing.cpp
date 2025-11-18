@@ -945,7 +945,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
 ) {
     // if not png: error?
 
-    const auto mask_x = load_and_resize_binary_png(
+    const auto mask_x = load_and_resize_binary_png2(
         filesize, 
         read_file_callback_p, 
         read_file_handle,
@@ -981,6 +981,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
 
     const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
         png_compress_binary_image(to_uint8_p(mask.data()), workshape.second, workshape.first);
+    
     if(!treeringmap_workshape_png_x)
         return std::nullopt;
 

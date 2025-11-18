@@ -123,6 +123,10 @@ def test_postprocess_treeringmapfile2():
     out2 = postp.postprocess_treeringmapfile(imgf2, (2700,3375), (2048,2048))
     assert len(out2['ring_points_xy']) == 5
 
-    assert 0
+    # actual bug: incorrect results due to downsampling
+    out2 = postp.postprocess_treeringmapfile(imgf2, (555,555), (2048,2048))
+    assert len(out2['ring_points_xy']) == 5
+
+
 
 
