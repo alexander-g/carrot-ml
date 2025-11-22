@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+        //to make sure that [][0] gives undefined
+        "noUncheckedIndexedAccess": true
+    },
+    "lock": false,
+    "tasks" : {
+        "cache": "deno cache ./tests/dep.ts && (deno bundle notafile.ts 2&> /dev/null || true)"
+    }
+}

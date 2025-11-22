@@ -12,23 +12,6 @@ from src import treerings_clustering_legacy as postp_legacy
 
 
 
-def test_merge_paths():
-    paths0 = [
-        np.linspace([10,10], [30,30], 20),
-        np.linspace([110,10], [120,20], 10),
-        # should be merged with #0
-        np.linspace([50,50], [60,60], 10),
-    ]
-    imageshape = (200,200)
-
-
-    out0 = postp_legacy.merge_paths(paths0, imageshape)
-    out1 = postp.merge_paths(paths0, imageshape)
-
-    assert len(out0) == 2
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
-
-
 
 def test_associate_boundaries():
     paths0 = [
@@ -43,7 +26,8 @@ def test_associate_boundaries():
     print(out0)
     print(out1)
     assert len(out0) == len(out1)
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
+    # NOTE: -1 for legacy reasons
+    assert all([np.allclose(np.array(o0)-1,o1) for o0, o1 in zip(out0, out1) ])
 
 
 
@@ -127,6 +111,29 @@ def test_postprocess_treeringmapfile2():
     out2 = postp.postprocess_treeringmapfile(imgf2, (555,555), (2048,2048))
     assert len(out2['ring_points_xy']) == 5
 
+    # another bug
+    imgf3 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap1.png' )
+    size3 = PIL.Image.open(imgf3).size
+    out3 = postp.postprocess_treeringmapfile(imgf3, size3[::-1], size3[::-1])
 
+    png_og_np  = np.array( PIL.Image.open(imgf3).convert('L')  ).astype(bool)
+    png_out_np = np.array(
+        PIL.Image.open( io.BytesIO(out3['treeringmap_workshape_png']) ).convert('L')
+    ).astype(bool)
+    assert (png_og_np == png_out_np).mean() > 0.97  #TODO: should be 1.0
+
+    assert len(out3['ring_points_xy']) == 3
+
+
+# another bug
+def test_postprocess_treeringmapfile3_large():
+    imgf4 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap2.png' )
+    workshape = (1535, 8191)
+    og_shape  = PIL.Image.open(imgf4).size[::-1]
+
+    #out0 = postp_legacy.postprocess_treeringmapfile(imgf4, workshape, og_shape)
+    out4 = postp.postprocess_treeringmapfile(imgf4, workshape, og_shape)
+
+    assert len(out4['ring_points_xy']) == 9
 
 

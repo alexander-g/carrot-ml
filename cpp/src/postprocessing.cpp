@@ -179,6 +179,13 @@ LineCoeffs rotate_ccw(const LineCoeffs& coef, const Point& p) {
     return LineCoeffs{a, b, c};
 }
 
+LineCoeffs rotate_cw(const LineCoeffs& coef, const Point& p) {
+    const double a =  coef.b;
+    const double b = -coef.a;
+    const double c = -(p[0] * a + p[1] * b);
+    return LineCoeffs{a, b, c};
+}
+
 
 
 /** Approximate two points in a set that are the furthest away from each other */
@@ -248,8 +255,21 @@ std::optional<double> max_mutual_overlap(const Path& path0, const Path& path1) {
     const Path path0_on_line_1 = project_points_onto_line(coef1, path0);
     const Path path1_on_line_1 = project_points_onto_line(coef1, path1);
 
-    const Point& p0 = path0_on_line_0.front();
-    const Point& p1 = path1_on_line_1.front();
+    const Point p0 = get_endpoints_of_set_of_points(Points{
+        path0_on_line_0.front(),
+        path0_on_line_0.back(),
+        path1_on_line_0.front(),
+        path1_on_line_0.back(),
+    }).value().first;  // NOTE: cant be std::nullopt because not empty
+    const Point p1 = get_endpoints_of_set_of_points(Points{
+        path0_on_line_1.front(),
+        path0_on_line_1.back(),
+        path1_on_line_1.front(),
+        path1_on_line_1.back(),
+    }).value().first;  // NOTE: cant be std::nullopt because not empty
+
+    //const Point& p0 = path0_on_line_0.front();
+    //const Point& p1 = path1_on_line_1.front();
 
     const auto distances0_on_0 = points_to_point_distances(path0_on_line_0, p0);
     const auto distances1_on_0 = points_to_point_distances(path1_on_line_0, p0);
@@ -410,7 +430,7 @@ Paths merge_paths(
 
         std::deque<Point> endpoints{path.front(), path.back()};
         while( endpoints.size() > 0 ) {
-            const Point e(path.front());
+            const Point e(endpoints.front());
             endpoints.pop_front();
 
             std::optional<Path*> closest_suitable_path = std::nullopt;
@@ -765,7 +785,7 @@ static std::vector<int> combine_paths(
     std::vector<int> path0,  //copy
     std::vector<int> path1  // copy
 ) {
-    while(!path0.empty() && path1.empty() && path0.back() == path1.back()) {
+    while(!path0.empty() && !path1.empty() && path0.back() == path1.back()) {
         path0.pop_back();
         path1.pop_back();
     }
@@ -779,13 +799,21 @@ static std::vector<int> combine_paths(
 std::optional<std::vector<int>> longest_path_from_dfs_result(const DFS_Result& dfs) {
     std::vector<std::vector<int>> paths;
     for(const int leaf: dfs.leaves) {
+        // path from leaves to root of dfs
         const std::vector<int> path = path_from_leaf(leaf, dfs.predecessors);
         paths.push_back(path);
     }
 
     size_t longest_path_size = 0;
     std::optional<std::vector<int>> longest_path = std::nullopt;
-    for(const auto& path0: paths)
+    for(const auto& path0: paths){
+        // consider single paths from leaf to root
+        if(path0.size() > longest_path_size){
+            longest_path = path0;
+            longest_path_size = path0.size();
+        }
+
+        // as well as combined with another one, if root is not endpoint
         for(const auto& path1: paths){
             if(&path0 == &path1)
                 continue;
@@ -796,7 +824,7 @@ std::optional<std::vector<int>> longest_path_from_dfs_result(const DFS_Result& d
                 longest_path_size = combined.size();
             }
         }
-    
+    }
 
     return longest_path;
 }
@@ -940,6 +968,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     size_t      filesize,
     const void* read_file_callback_p,
     const void* read_file_handle,
+    // shape: height first, width second
     const ImageShape& workshape,
     const ImageShape& og_shape
 ) {
@@ -949,8 +978,8 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
         filesize, 
         read_file_callback_p, 
         read_file_handle,
-        workshape.first,
-        workshape.second
+        workshape.second,  // width
+        workshape.first    // height
     );
     if(!mask_x)
         return std::nullopt;
@@ -980,7 +1009,11 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     // ring_areas = [treering_area(*rp) for rp in ring_points]
 
     const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
-        png_compress_binary_image(to_uint8_p(mask.data()), workshape.second, workshape.first);
+        png_compress_binary_image(
+            to_uint8_p(mask.data()), 
+            mask.dimension(1),        // width
+            mask.dimension(0)         // height
+        );
     
     if(!treeringmap_workshape_png_x)
         return std::nullopt;
