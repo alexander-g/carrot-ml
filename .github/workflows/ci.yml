@@ -59,8 +59,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release          \
             -DCMAKE_VERBOSE_MAKEFILE=ON
           emmake make
-          pwd
-          ls -halt
+          ../../deno.sh bundle --outdir=./bundle ../carrot-wasm-postprocessing.ts
 
       - name: Test
         run: |
@@ -71,7 +70,7 @@ jobs:
         with:
           name: modules
           path: |
-            cpp/build-wasm/carrot_postprocessing_wasm.js
+            cpp/build-wasm/bundle/carrot-wasm-postprocessing.js
             cpp/carrot-wasm-postprocessing.d.ts
           if-no-files-found: error
 
