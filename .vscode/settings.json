@@ -1,3 +1,4 @@
 {
-    "python.linting.mypyEnabled": true
+    "deno.path": "./deno.sh",
+    "deno.enable": true
 }

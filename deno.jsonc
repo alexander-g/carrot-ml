@@ -5,6 +5,6 @@
     },
     "lock": false,
     "tasks" : {
-        "cache": "deno cache ./tests/dep.ts && (deno bundle notafile.ts 2&> /dev/null || true)"
+        "cache": "deno cache ./cpp/dep.ts ./tests/dep.ts && (deno bundle notafile.ts 2&> /dev/null || true)"
     }
 }

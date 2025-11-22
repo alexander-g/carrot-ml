@@ -34,3 +34,45 @@ jobs:
           pip install -r requirements.frozen.txt
           ./run_tests.sh
 
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+      
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.69
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Deno
+        run: |
+          ./deno.sh task cache
+      
+      - name: Build
+        run: |
+          emcc -v
+          mkdir cpp/build-wasm
+          cd cpp/build-wasm
+          emcmake cmake ..                      \
+            -DCMAKE_BUILD_TYPE=Release          \
+            -DCMAKE_VERBOSE_MAKEFILE=ON
+          emmake make
+          pwd
+          ls -halt
+
+      - name: Test
+        run: |
+          ./run_tests_deno.sh
+      
+      - name: Archive JS module
+        uses: actions/upload-artifact@v4
+        with:
+          name: modules
+          path: |
+            cpp/build-wasm/carrot_postprocessing_wasm.js
+            cpp/carrot-wasm-postprocessing.d.ts
+          if-no-files-found: error
+
+
