@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "../wasm-morpho/src/morphology.hpp"
+#include "../wasm-big-image/src/util.hpp"
 
 
 typedef std::array<double, 2> Point;
@@ -30,5 +31,28 @@ std::vector<std::pair<int,int>> associate_boundaries(const Paths& paths);
 
 /** Group points from path 0 to corresponding points from path 1 */
 std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1);
+
+/** Skeletonize and vectorize boundaries  */
+Paths segmentation_to_paths(
+    const EigenBinaryMap& mask, 
+    double min_length
+);
+
+struct TreeringsPostprocessingResult {
+    const Buffer_p treeringmap_workshape_png;
+    // EigenBinaryMap treeringmap_ogshape;
+
+    const PairedPaths ring_points_xy;
+
+};
+
+std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
+    size_t      filesize,
+    const void* read_file_callback_p,
+    const void* read_file_handle,
+    const ImageShape& workshape,
+    const ImageShape& og_shape
+);
+
 
 #endif

@@ -8,6 +8,11 @@
 
 #include "./postprocessing.hpp"
 
+#include "./image-utils.hpp"
+#include "./utils.hpp"
+
+#include "../wasm-big-image/src/png-io.hpp"
+
 
 
 typedef struct LineCoeffs {
@@ -23,12 +28,6 @@ typedef std::pair<int,int> IntPair;
 
 
 
-
-template<typename T>
-std::vector<std::vector<T>> sort_by_length(std::vector<std::vector<T>> x) {
-    std::ranges::sort(x, std::greater{}, &std::vector<T>::size);
-    return x;
-}
 
 const Point INFPOINT = {INFINITY, INFINITY};
 
@@ -180,6 +179,13 @@ LineCoeffs rotate_ccw(const LineCoeffs& coef, const Point& p) {
     return LineCoeffs{a, b, c};
 }
 
+LineCoeffs rotate_cw(const LineCoeffs& coef, const Point& p) {
+    const double a =  coef.b;
+    const double b = -coef.a;
+    const double c = -(p[0] * a + p[1] * b);
+    return LineCoeffs{a, b, c};
+}
+
 
 
 /** Approximate two points in a set that are the furthest away from each other */
@@ -249,8 +255,21 @@ std::optional<double> max_mutual_overlap(const Path& path0, const Path& path1) {
     const Path path0_on_line_1 = project_points_onto_line(coef1, path0);
     const Path path1_on_line_1 = project_points_onto_line(coef1, path1);
 
-    const Point& p0 = path0_on_line_0.front();
-    const Point& p1 = path1_on_line_1.front();
+    const Point p0 = get_endpoints_of_set_of_points(Points{
+        path0_on_line_0.front(),
+        path0_on_line_0.back(),
+        path1_on_line_0.front(),
+        path1_on_line_0.back(),
+    }).value().first;  // NOTE: cant be std::nullopt because not empty
+    const Point p1 = get_endpoints_of_set_of_points(Points{
+        path0_on_line_1.front(),
+        path0_on_line_1.back(),
+        path1_on_line_1.front(),
+        path1_on_line_1.back(),
+    }).value().first;  // NOTE: cant be std::nullopt because not empty
+
+    //const Point& p0 = path0_on_line_0.front();
+    //const Point& p1 = path1_on_line_1.front();
 
     const auto distances0_on_0 = points_to_point_distances(path0_on_line_0, p0);
     const auto distances1_on_0 = points_to_point_distances(path1_on_line_0, p0);
@@ -379,16 +398,6 @@ Path merge_and_reorder(const Path& path0, const Path& path1) {
 
 }
 
-template<class T>
-void remove_zero_sized(std::vector<std::vector<T>>& v) {
-    v.erase(
-        std::remove_if(
-            v.begin(), 
-            v.end(),
-            [](const std::vector<T>& inner){ return inner.empty(); }),
-            v.end()
-        );
-}
 
 
 Paths merge_paths(
@@ -421,7 +430,7 @@ Paths merge_paths(
 
         std::deque<Point> endpoints{path.front(), path.back()};
         while( endpoints.size() > 0 ) {
-            const Point e(path.front());
+            const Point e(endpoints.front());
             endpoints.pop_front();
 
             std::optional<Path*> closest_suitable_path = std::nullopt;
@@ -473,55 +482,7 @@ Paths merge_paths(
 }
 
 
-template<typename T>
-std::vector<T> slice_vector(const std::vector<T>& v, size_t start, size_t len){
-    if(start > v.size()) 
-        start = v.size();
-    const size_t end = std::min(v.size(), start + len);
-    return std::vector<T>(v.begin() + start, v.begin() + end);
-}
 
-
-template<typename T>
-std::optional<double> mean(std::vector<T> x) {
-    return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
-}
-
-
-template<std::floating_point T = double>
-std::vector<T> linspace(T start, T stop, std::size_t n, bool endpoint=true) {
-    if(n == 0)
-        return {};
-    if(n == 1)
-        return {start};
-    std::vector<T> output;
-    output.reserve(n);
-    T step = endpoint ? (stop - start) / static_cast<T>(n - 1)
-                      : (stop - start) / static_cast<T>(n);
-    for(std::size_t i = 0; i < n; i++)
-        output.push_back(start + step * static_cast<T>(i));
-    if(endpoint)
-        output.back() = stop; // avoid FP drift
-    return output;
-}
-
-template<class T>
-std::optional<T> most_common(const std::vector<T>& v) {
-    if (v.empty()) 
-        return std::nullopt;
-    
-    std::unordered_map<T, size_t> freq;
-    freq.reserve(v.size());
-
-    for(const auto& x : v) 
-        ++freq[x];
-    
-    auto best = std::begin(freq);
-    for (auto it = std::next(std::begin(freq)); it != std::end(freq); it++)
-        if(it->second > best->second)
-            best = it;
-    return best->first;
-}
 
 /** Return unique int values in a std::vector<IntPair */
 std::vector<int> unique_pairs_values(const std::vector<IntPair>& x) {
@@ -639,8 +600,7 @@ std::vector<IntPair> find_longest_chain(std::vector<IntPair> pairs) {
                     pair = {pair.second, pair.first};
                 
                 if(pair.first == next_index) {
-                    // NOTE: +1 because of legacy reasons
-                    chain.push_back({pair.first+1, pair.second+1});
+                    chain.push_back({pair.first, pair.second});
                     it = pairs_list.erase(it);
                     next_index = pair.second;
                     found = true;
@@ -692,10 +652,8 @@ std::vector<IntPair>  associate_boundaries(const Paths& paths) {
         return {};
 
     // reverse boundaries if needed, closest to the topleft corner first
-    // NOTE: -1 bc of legacy reasons
-    // TODO: remove
-    const Path& path_first = paths[longest_chain.front().first - 1];
-    const Path& path_last  = paths[longest_chain.back().second - 1];
+    const Path& path_first = paths[longest_chain.front().first];
+    const Path& path_last  = paths[longest_chain.back().second];
     const double meandist0 = 
         mean( points_to_point_distances(path_first, {0,0}) ).value_or(0.0);
     const double meandist1 = 
@@ -771,7 +729,7 @@ Path resample_path(const Path& path, double step) {
 
 
 /** Group points from path 0 to corresponding points from path 1 */
-std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1) {
+PathPair associate_pathpoints(const Path& path0, const Path& path1) {
     const double step = std::min( path_length(path0), path_length(path1) ) / 10;
     // TODO: how to handle step == 0
 
@@ -809,5 +767,263 @@ std::pair<Path, Path> associate_pathpoints(const Path& path0, const Path& path1)
     return {resampledpath0, resampledpath1};
 }
 
+
+
+std::vector<int> path_from_leaf(int leaf, const std::vector<int>& predecessors) {
+    std::vector<int> path{ leaf };
+    while(1){
+        if( leaf < 0 || leaf >= predecessors.size())
+            break;
+
+        leaf = predecessors[leaf];
+        path.push_back(leaf);
+    }
+    return path;
+}
+
+static std::vector<int> combine_paths(
+    std::vector<int> path0,  //copy
+    std::vector<int> path1  // copy
+) {
+    while(!path0.empty() && !path1.empty() && path0.back() == path1.back()) {
+        path0.pop_back();
+        path1.pop_back();
+    }
+    
+    const auto path1_rev = std::views::reverse(path1);
+    return concat_copy(path0, path1_rev) ;
+
+}
+
+
+std::optional<std::vector<int>> longest_path_from_dfs_result(const DFS_Result& dfs) {
+    std::vector<std::vector<int>> paths;
+    for(const int leaf: dfs.leaves) {
+        // path from leaves to root of dfs
+        const std::vector<int> path = path_from_leaf(leaf, dfs.predecessors);
+        paths.push_back(path);
+    }
+
+    size_t longest_path_size = 0;
+    std::optional<std::vector<int>> longest_path = std::nullopt;
+    for(const auto& path0: paths){
+        // consider single paths from leaf to root
+        if(path0.size() > longest_path_size){
+            longest_path = path0;
+            longest_path_size = path0.size();
+        }
+
+        // as well as combined with another one, if root is not endpoint
+        for(const auto& path1: paths){
+            if(&path0 == &path1)
+                continue;
+            
+            const auto combined = combine_paths(path0, path1);
+            if(combined.size() > longest_path_size){
+                longest_path = combined;
+                longest_path_size = combined.size();
+            }
+        }
+    }
+
+    return longest_path;
+}
+
+
+std::vector<Indices2D> reorient_paths(const std::vector<Indices2D>& paths) {
+    if(paths.size() == 0)
+        return {};
+    
+    std::vector<Indices2D> valid_paths;
+    std::vector<Vector> directions;
+    std::vector<int> largest_axes;
+    for(const Indices2D& path: paths) {
+        if(path.size() < 2)
+            continue;
+        
+        valid_paths.push_back(path);
+        const Vector direction{ 
+            (double)path.front().i - path.back().i, 
+            (double)path.front().j - path.back().j
+        };
+        directions.push_back(direction);
+
+        const int largest_axis = (direction[0] > direction[1])? 0 : 1;
+        largest_axes.push_back(largest_axis);
+    }
+    if(largest_axes.empty())
+        return {};
+    
+    const int common_axis = most_common(largest_axes).value();
+
+    std::vector<int> orientations;
+    for(const Vector& direction: directions)
+        orientations.push_back( std::copysign(1, direction[common_axis]) );
+    
+    const int common_orientation = most_common(orientations).value();
+    
+    std::vector<Indices2D> new_paths;
+    for(int i = 0; i < valid_paths.size(); i++) {
+        Indices2D& path = valid_paths[i];
+        if(orientations[i] == common_orientation)
+            std::reverse(path.begin(), path.end());
+
+        new_paths.push_back( path );
+    }
+    return new_paths;
+}
+
+
+std::vector<Index2D> gather_path_coordinates(
+    const std::vector<int>&     path,
+    const std::vector<Index2D>& coordinates
+) {
+    std::vector<Index2D> path_coordinates;
+    for(const int i: path){
+        if( i < 0 )
+            continue;
+        // TODO: how to handle i > coordinates.size()?
+        path_coordinates.push_back(coordinates[i]);
+    }
+    return path_coordinates;
+}
+
+
+Paths indices_to_points(std::vector<Indices2D> indicesvector) {
+    Paths output;
+    for(const Indices2D& indices: indicesvector){
+        Path path;
+        for(const Index2D& index: indices)
+            // yx to xy
+            path.push_back({ (double)index.j, (double)index.i });
+        
+        output.push_back(path);
+    }
+    return output;
+}
+
+
+Paths segmentation_to_paths(
+    const EigenBinaryMap& mask, 
+    double min_length
+) {
+    const EigenBinaryMap skeleton = skeletonize(mask);
+    const CCResult ccresult = connected_components(skeleton);
+
+    
+    if(min_length < 1.0){
+        // relative to image width (normally the smaller side of an image)
+        min_length *= std::min({mask.dimension(0), mask.dimension(1)});
+    }
+
+    std::vector<Indices2D> paths;
+    for(const auto& dfs: ccresult.dfs_results){
+        const auto path = longest_path_from_dfs_result(dfs);
+        if(path && path->size() > 1 && path->size() > min_length)
+            paths.push_back(  gather_path_coordinates(*path, dfs.visited)  );
+    }
+
+    const std::vector<Indices2D> reoriented_paths = reorient_paths(paths);
+    return indices_to_points(reoriented_paths);
+}
+
+
+template<typename T>
+uint8_t* to_uint8_p(T* p) {
+    static_assert( sizeof(T) == sizeof(uint8_t) );
+    return (uint8_t*) p;
+}
+
+
+/** Rescale points from one image shape to another.
+    Points are expected to be in XY format, shapes in HW. */
+Points scale_points(
+    const Points& points_xy, 
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape
+) {
+    const std::pair<double, double> scale = {
+        to_shape.first  / (double)from_shape.first,    // height
+        to_shape.second / (double)from_shape.second    // width
+    };
+    Points output;
+    for(const Point& point: points_xy)
+        output.push_back({point[0] * scale.second, point[1] * scale.first});
+    return output;
+}
+
+Paths scale_paths(
+    const Paths& paths, 
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape
+) {
+    Paths output;
+    for(const Path& path: paths)
+        output.push_back( scale_points(path, from_shape, to_shape) );
+    return output;
+}
+
+
+std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
+    size_t      filesize,
+    const void* read_file_callback_p,
+    const void* read_file_handle,
+    // shape: height first, width second
+    const ImageShape& workshape,
+    const ImageShape& og_shape
+) {
+    // if not png: error?
+
+    const auto mask_x = load_and_resize_binary_png2(
+        filesize, 
+        read_file_callback_p, 
+        read_file_handle,
+        workshape.second,  // width
+        workshape.first    // height
+    );
+    if(!mask_x)
+        return std::nullopt;
+    
+    const EigenBinaryMap& mask = mask_x.value();
+
+    const Paths simple_paths = segmentation_to_paths(mask, 0.0);
+          Paths merged_paths = merge_paths(simple_paths, workshape);
+
+    if(og_shape != workshape)
+        merged_paths = scale_paths(merged_paths, workshape, og_shape);
+
+    const std::vector<IntPair> ring_labels = associate_boundaries(merged_paths);
+    PairedPaths paired_paths;
+    for(const IntPair& labelpair: ring_labels)
+        paired_paths.push_back(
+            associate_pathpoints(
+                merged_paths[labelpair.first], 
+                merged_paths[labelpair.second]
+            )
+        );
+    
+    // ring_points = [
+    //     associate_pathpoints(ring_paths_yx[r0-1], ring_paths_yx[r1-1]) 
+    //         for r0,r1 in ring_labels
+    // ]
+    // ring_areas = [treering_area(*rp) for rp in ring_points]
+
+    const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
+        png_compress_binary_image(
+            to_uint8_p(mask.data()), 
+            mask.dimension(1),        // width
+            mask.dimension(0)         // height
+        );
+    
+    if(!treeringmap_workshape_png_x)
+        return std::nullopt;
+
+    // return {data_encoded_workshape, data_encoded_og_shape, ring_points, ring_labels, ring_areas};
+
+    return TreeringsPostprocessingResult{
+        /*treeringmap_workshape_png = */ treeringmap_workshape_png_x.value(),
+        /*ring_points_xy = */ paired_paths
+    };
+}
 
 

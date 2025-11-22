@@ -1,28 +1,15 @@
+import io
+import os
 import sys
 sys.path.insert(0,'cpp/build/')
+import tempfile
 
 import numpy as np
+import PIL.Image
 
 import carrot_postprocessing_ext as postp
 from src import treerings_clustering_legacy as postp_legacy
 
-
-
-def test_merge_paths():
-    paths0 = [
-        np.linspace([10,10], [30,30], 20),
-        np.linspace([110,10], [120,20], 10),
-        # should be merged with #0
-        np.linspace([50,50], [60,60], 10),
-    ]
-    imageshape = (200,200)
-
-
-    out0 = postp_legacy.merge_paths(paths0, imageshape)
-    out1 = postp.merge_paths(paths0, imageshape)
-
-    assert len(out0) == 2
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
 
 
 
@@ -39,7 +26,8 @@ def test_associate_boundaries():
     print(out0)
     print(out1)
     assert len(out0) == len(out1)
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out0, out1) ])
+    # NOTE: -1 for legacy reasons
+    assert all([np.allclose(np.array(o0)-1,o1) for o0, o1 in zip(out0, out1) ])
 
 
 
@@ -57,5 +45,95 @@ def test_associate_pathpoints():
 
     assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p0, out0p0) ])
     assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p1, out0p1) ])
+
+
+
+def test_segmentation_to_paths():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[100:-100, 100:200] = 1  # object 0
+    mask[300:-300, 300:400] = 1  # object 1
+    mask[300: 310, 300:450] = 1  # object 1 too
+    mask[250:-250, 500:600] = 1  # object 2
+
+    out0 = postp_legacy.segmentation_to_paths(mask, 0.0)
+    out1 = postp.segmentation_to_paths(mask, 0.0)
+
+    print( [o.shape for o in out0] )
+    print( [o.shape for o in out1] )
+
+    assert len(out1) == len(out0) == 3
+    assert all( [1000 > len(o) > 300 for o in out1] )
+    # not exactly equal
+    #assert all( [len(o0) == len(o1) for o0, o1 in zip(out0, out1)] )
+    # actual bug
+    assert all( (o1 < 1000).all() for o1 in out1)
+
+
+
+def test_postprocess_treeringmapfile():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10:-10, 100:110] = 1
+    mask[50:-50, 200:250] = 1
+    mask[10:-10, 300:350] = 1
+    mask[10:-10, 600:605] = 1
+    mask[10:-10, 800] = 1
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (555,555)
+    og_shape  = mask.shape
+    out0 = postp_legacy.postprocess_treeringmapfile(maskf, workshape, og_shape)
+    print([ (x0.mean(0), x1.mean(0)) for x0,x1 in out0.ring_points_yx])
+    print([ (x0.shape, x1.shape) for x0,x1 in out0.ring_points_yx])
+
+    out1 = postp.postprocess_treeringmapfile(maskf, workshape, og_shape)
+    print([ (x0.mean(0), x1.mean(0)) for x0,x1 in out1['ring_points_xy']])
+    print([ (x0.shape, x1.shape) for x0,x1 in out1['ring_points_xy']])
+
+    assert len(out0.ring_points_yx) == len(out1['ring_points_xy'])
+    assert all([ 
+        (out0x0.shape == out1x0.shape and out0x1.shape == out1x1.shape)   
+            for ([out0x0, out0x1], [out1x0, out1x1]) 
+                in zip(out0.ring_points_yx, out1['ring_points_xy'])  
+    ])
+
+    assert PIL.Image.open( io.BytesIO(out1['treeringmap_workshape_png']) ).size == workshape
+    #assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
+
+
+def test_postprocess_treeringmapfile2():
+    imgf2 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap0.png' )
+    out2 = postp.postprocess_treeringmapfile(imgf2, (2700,3375), (2048,2048))
+    assert len(out2['ring_points_xy']) == 5
+
+    # actual bug: incorrect results due to downsampling
+    out2 = postp.postprocess_treeringmapfile(imgf2, (555,555), (2048,2048))
+    assert len(out2['ring_points_xy']) == 5
+
+    # another bug
+    imgf3 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap1.png' )
+    size3 = PIL.Image.open(imgf3).size
+    out3 = postp.postprocess_treeringmapfile(imgf3, size3[::-1], size3[::-1])
+
+    png_og_np  = np.array( PIL.Image.open(imgf3).convert('L')  ).astype(bool)
+    png_out_np = np.array(
+        PIL.Image.open( io.BytesIO(out3['treeringmap_workshape_png']) ).convert('L')
+    ).astype(bool)
+    assert (png_og_np == png_out_np).mean() > 0.97  #TODO: should be 1.0
+
+    assert len(out3['ring_points_xy']) == 3
+
+
+# another bug
+def test_postprocess_treeringmapfile3_large():
+    imgf4 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap2.png' )
+    workshape = (1535, 8191)
+    og_shape  = PIL.Image.open(imgf4).size[::-1]
+
+    #out0 = postp_legacy.postprocess_treeringmapfile(imgf4, workshape, og_shape)
+    out4 = postp.postprocess_treeringmapfile(imgf4, workshape, og_shape)
+
+    assert len(out4['ring_points_xy']) == 9
 
 

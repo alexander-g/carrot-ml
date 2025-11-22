@@ -4,10 +4,13 @@
 #include <pybind11/numpy.h>
 
 #include "./postprocessing.hpp"
+#include "../wasm-big-image/src/util.hpp"
 
 
 namespace py = pybind11;
 typedef py::array_t<double, py::array::c_style | py::array::forcecast> py_f64_array;
+typedef py::array_t<bool, py::array::c_style | py::array::forcecast> py_bool_array;
+
 
 /** ndarray of shape [N,2] to std::vector<std::pair<double,double>> */
 Path  path_numpy_to_stdvec(const py_f64_array& a);
@@ -23,6 +26,12 @@ py::list paths_stdvec_to_numpy(const Paths& paths);
 
 /** std::vector<std::pair<int,int>> to list of tp.Tuple[int,int] */
 py::list vec_pairs_to_pylist(const std::vector<std::pair<int,int>>& v);
+
+/** tp.List[tp.Tuple[np.ndarray, np.ndarray]] */
+py::list vec_paired_paths_to_numpy(const PairedPaths& pp);
+
+
+py::bytes buffer_to_bytes(const Buffer& b);
 
 
 #endif
