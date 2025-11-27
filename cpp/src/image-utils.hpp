@@ -24,3 +24,9 @@ std::expected<EigenBinaryMap, int> load_and_resize_binary_png2(
 );
 
 
+// compile time check
+template<typename T> uint8_t* to_uint8_p(T* p) {
+    static_assert( sizeof(T) == sizeof(uint8_t) );
+    return (uint8_t*) p;
+}
+

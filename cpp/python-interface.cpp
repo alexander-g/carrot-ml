@@ -12,6 +12,7 @@
 #include "./wasm-big-image/src/util.hpp"
 #include "./src/pybind-utils.hpp"
 #include "./src/postprocessing.hpp"
+#include "./src/postprocessing_cells.hpp"
 
 
 namespace py = pybind11;
@@ -84,6 +85,35 @@ py::dict postprocess_treeringmapfile_py(
     return d;
 }
 
+py::dict postprocess_cellmapfile_py(
+    const std::string& path, 
+    const ImageShape& workshape, 
+    const ImageShape& og_shape
+) {
+   const auto fhandle_o = FileHandle::open(path.c_str());
+    if(!fhandle_o)
+        throw std::runtime_error("Could not open file");
+    const FileHandle* fhandle = fhandle_o.value().get();
+
+    const auto output_x = postprocess_cellmapfile(
+        fhandle->size, 
+        (const void*) &fhandle->read_callback, 
+        (void*) fhandle, 
+        workshape,
+        og_shape
+    );
+    if(!output_x)
+        throw std::runtime_error("Postprocessing failed");
+
+    py::dict d;
+    d["cellmap_workshape_png"] = 
+        buffer_to_bytes(*output_x->cellmap_workshape_png);
+    d["instancemap_workshape_png"] = 
+        buffer_to_bytes(*output_x->instancemap_workshape_png);
+    return d;
+}
+
+
 
 
 PYBIND11_MODULE(carrot_postprocessing_ext, m) {
@@ -123,6 +153,16 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         py::arg("workshape"),
         py::arg("og_shape")
     );
+
+    m.def(
+        "postprocess_cellmapfile",
+        postprocess_cellmapfile_py,
+        py::arg("path").noconvert(),
+        py::arg("workshape"),
+        py::arg("og_shape")
+    );
+
+    
 }
 
 

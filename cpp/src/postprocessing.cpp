@@ -928,11 +928,6 @@ Paths segmentation_to_paths(
 }
 
 
-template<typename T>
-uint8_t* to_uint8_p(T* p) {
-    static_assert( sizeof(T) == sizeof(uint8_t) );
-    return (uint8_t*) p;
-}
 
 
 /** Rescale points from one image shape to another.
@@ -1009,10 +1004,11 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     // ring_areas = [treering_area(*rp) for rp in ring_points]
 
     const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
-        png_compress_binary_image(
+        png_compress_image(
             to_uint8_p(mask.data()), 
-            mask.dimension(1),        // width
-            mask.dimension(0)         // height
+            /*width=*/    mask.dimension(1),
+            /*height=*/   mask.dimension(0),
+            /*channels=*/ 1
         );
     
     if(!treeringmap_workshape_png_x)
