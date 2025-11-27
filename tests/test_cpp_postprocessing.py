@@ -137,3 +137,43 @@ def test_postprocess_treeringmapfile3_large():
     assert len(out4['ring_points_xy']) == 9
 
 
+
+
+def test_postprocess_cellmapfile():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10:-10, 100:110] = 1
+    mask[50:-50, 200:250] = 1
+    mask[10:-10, 300:350] = 1
+    mask[10:-10, 600:605] = 1
+    mask[10:-10, 800] = 1
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (555,555)
+    og_shape  = mask.shape
+    out1 = postp.postprocess_cellmapfile(maskf, workshape, og_shape)
+
+    instancemap1 = np.array(
+        PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
+    )
+    assert instancemap1.shape == workshape+(3,)
+    
+    unique_colors = np.unique(instancemap1.reshape(-1,3), axis=0)
+    assert len(unique_colors) == 5+1  # 5 objects + background
+
+
+    #bug: mask grows on multiple iterations
+    maskf2 = os.path.join(tempdir.name, 'testmask2.png')
+    PIL.Image.open( io.BytesIO(out1['cellmap_workshape_png']) ).save(maskf2)
+    out2 = postp.postprocess_cellmapfile(maskf2, workshape, og_shape)
+
+    n1 = np.array( PIL.Image.open( io.BytesIO(out1['cellmap_workshape_png']) ) ).sum()
+    n2 = np.array( PIL.Image.open( io.BytesIO(out2['cellmap_workshape_png']) ) ).sum()
+
+    assert n1 == n2
+
+
+
+
+    

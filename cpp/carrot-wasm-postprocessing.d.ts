@@ -13,6 +13,12 @@ export type TreeringPostprocessingResult = {
     ring_points_xy: PairedPaths;
 }
 
+export type CellsPostprocessingResult = {
+    cellmap_workshape_png: File;
+    instancemap_workshape_png: File;
+}
+
+
 
 export declare class CARROT_Postprocessing {
     private constructor();
@@ -22,6 +28,12 @@ export declare class CARROT_Postprocessing {
         work_size:   ImageSize,
         og_size:     ImageSize,
     ): Promise<TreeringPostprocessingResult | Error>;
+
+    postprocess_cellmapfile(
+        cellmap:     File,
+        work_size:   ImageSize,
+        og_size:     ImageSize,
+    ): Promise<CellsPostprocessingResult | Error>;
 }
 
 
