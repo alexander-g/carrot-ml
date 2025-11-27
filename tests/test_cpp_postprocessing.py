@@ -176,4 +176,25 @@ def test_postprocess_cellmapfile():
 
 
 
+def test_points_in_polygon():
+    points = np.array([
+        (200, 200),  # inside
+        (50,  200),  # outside
+    ]).astype('float64')
+    polygon = np.array([
+        (100,208),
+        (115,83),
+        (218,64),
+        (260,119),
+        (276,217),
+        (340,232),
+        (369,74),
+        (426,69),
+        (445,286),
+        (251,304),
+        (131,265)
+    ]).astype('float64')
+
+    output = postp.points_in_polygon(points, polygon)
+    assert output.tolist() == [True,False]
     

@@ -21,6 +21,9 @@ Paths paths_numpy_to_stdvec(py::list paths);
 /** std::vector<std::pair<double,double>> to ndarray shape [N,2] */
 py_f64_array path_stdvec_to_numpy(const Path& path);
 
+/** std::vector<bool> to ndarray shape [N], dtype bool */
+py_bool_array bool_stdvec_to_numpy(const std::vector<bool>& boolarray);
+
 /** std::vector<std::vector<...> to list of ndarrays of shape [N,2] */
 py::list paths_stdvec_to_numpy(const Paths& paths);
 

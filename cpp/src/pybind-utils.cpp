@@ -43,6 +43,15 @@ py_f64_array path_stdvec_to_numpy(const Path& path) {
     return a;
 }
 
+py_bool_array bool_stdvec_to_numpy(const std::vector<bool>& boolarray) {
+    const int n = boolarray.size();
+    py_bool_array output({n});
+    auto buffer = output.mutable_unchecked<1>();
+    for(int i = 0; i < n; i++)
+        buffer(i) = boolarray[i];
+    return output;
+}
+
 py::list paths_stdvec_to_numpy(const Paths& paths){
     py::list out;
     

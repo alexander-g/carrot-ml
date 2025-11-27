@@ -2,10 +2,10 @@
 
 #include <expected>
 
+#include "./geometry.hpp"
 #include "../wasm-morpho/src/morphology.hpp"
 #include "../wasm-big-image/src/util.hpp"
 
-typedef std::pair<int,int>    ImageShape;
 
 struct CellsPostprocessingResult {
     const Buffer_p cellmap_workshape_png;

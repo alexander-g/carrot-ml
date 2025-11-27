@@ -57,6 +57,19 @@ py::list segmentation_to_paths_py(const py_bool_array& mask_py, double min_lengt
     return paths_stdvec_to_numpy(paths);
 }
 
+py_bool_array points_in_polygon_py(
+    const py_f64_array points_py, 
+    const py_f64_array polygon_py
+) {
+    const Points points  = path_numpy_to_stdvec(points_py);
+    const Path   polygon = path_numpy_to_stdvec(polygon_py);
+
+    std::vector<bool> insides = points_in_polygon(points, polygon);
+    return bool_stdvec_to_numpy(insides);
+}
+
+
+
 py::dict postprocess_treeringmapfile_py(
     const std::string& path, 
     const ImageShape& workshape, 
@@ -144,6 +157,13 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         segmentation_to_paths_py,
         py::arg("mask").noconvert(),
         py::arg("min_length")
+    );
+
+    m.def(
+        "points_in_polygon",
+        points_in_polygon_py,
+        py::arg("p"),
+        py::arg("polygon")
     );
 
     m.def(
