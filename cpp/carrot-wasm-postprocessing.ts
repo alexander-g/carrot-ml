@@ -346,7 +346,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 cellmap.size, 
                 this.#read_file_callback_ptr, 
                 handle_cells, 
-                cellmap.size, 
+                treeringmap.size, 
                 this.#read_file_callback_ptr, 
                 handle_rings, 
                 work_size.width, 
