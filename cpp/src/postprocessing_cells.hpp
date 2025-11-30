@@ -8,14 +8,14 @@
 
 
 struct CellsPostprocessingResult {
-    const Buffer_p cellmap_workshape_png;
+    Buffer_p cellmap_workshape_png;
     // EigenBinaryMap cellmap_ogshape;
 
     /** PNG image with cells individually colored */
-    const Buffer_p instancemap_workshape_png;
+    Buffer_p instancemap_workshape_png;
 
     /** Cell points as detected by connected components */
-    const CCResult cells;
+    CCResult cells;
 };
 
 
@@ -44,7 +44,7 @@ struct CombinedPostprocessingResult {
     std::vector<CellInfo> cell_info;
 
     /** PNG image with cells colored by treering they are in */
-    const Buffer_p ringmap_rgb_png;
+    Buffer_p ringmap_rgb_png;
 };
 
 

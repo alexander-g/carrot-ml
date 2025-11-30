@@ -13,7 +13,7 @@ Deno.test('postprocess_treeringmapfile', async () => {
     const worksize = {width: 555, height:555}
     const og_size = {width:2048, height:2048}
 
-    const output0 = await module.postprocess_treeringmapfile(invalidfile, worksize, og_size)
+    const output0 = await module.postprocess_combined(null, invalidfile, worksize, og_size)
     asserts.assertInstanceOf(output0, Error)
     // make sure no c++ error
     asserts.assert(
@@ -26,10 +26,11 @@ Deno.test('postprocess_treeringmapfile', async () => {
     const filepath0 = import.meta.resolve('./assets/treeringsmap0.png').replace('file://','')
     const treeringmapfile0 = new File([Deno.readFileSync(filepath0)], 'treerrings.png')
 
-    const output1 = await module.postprocess_treeringmapfile(treeringmapfile0, worksize, og_size)
+    const output1 = await module.postprocess_combined(null, treeringmapfile0, worksize, og_size)
     console.log()
     //console.log(output1)
     asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert('ring_points_xy' in output1)
     asserts.assertEquals(output1.ring_points_xy.length, 5)
 
 
@@ -39,9 +40,10 @@ Deno.test('postprocess_treeringmapfile', async () => {
 
     const worksize2 = {width: 3297, height:4379}
     const og_size2 = {width:3297, height:4379}
-    const output2 = await module.postprocess_treeringmapfile(treeringmapfile1, worksize2, og_size2)
+    const output2 = await module.postprocess_combined(null, treeringmapfile1, worksize2, og_size2)
     console.log()
     asserts.assertNotInstanceOf(output2, Error)
+    asserts.assert('ring_points_xy' in output2)
     asserts.assertEquals(output2.ring_points_xy.length, 3)
 })
 
@@ -53,7 +55,7 @@ Deno.test('postprocess_cellmapfile', async () => {
     const worksize = {width: 555, height:555}
     const og_size = {width:2048, height:2048}
 
-    const output0 = await module.postprocess_cellmapfile(invalidfile, worksize, og_size)
+    const output0 = await module.postprocess_combined(invalidfile, null, worksize, og_size)
     asserts.assertInstanceOf(output0, Error)
     // make sure no c++ error
     asserts.assert(
@@ -65,10 +67,11 @@ Deno.test('postprocess_cellmapfile', async () => {
     const filepath0 = import.meta.resolve('./assets/cellmap0.png').replace('file://','')
     const cellmapfile0 = new File([Deno.readFileSync(filepath0)], 'cellmap.png')
 
-    const output1 = await module.postprocess_cellmapfile(cellmapfile0, worksize, og_size)
+    const output1 = await module.postprocess_combined(cellmapfile0, null, worksize, og_size)
     console.log()
     //console.log(output1)
     asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert('instancemap_workshape_png' in output1)
 })
 
 
@@ -97,6 +100,7 @@ Deno.test('postprocess_combined', async () => {
     console.log()
     //console.log(output1)
     asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert('ringmap_workshape_png' in output1)
 })
 
 
