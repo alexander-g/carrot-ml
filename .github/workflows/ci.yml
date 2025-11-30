@@ -59,7 +59,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release          \
             -DCMAKE_VERBOSE_MAKEFILE=ON
           emmake make
-          ../../deno.sh bundle --outdir=./bundle ../carrot-wasm-postprocessing.ts
+          ../../deno.sh bundle --minify --outdir=./bundle ../carrot-wasm-postprocessing.ts
 
       - name: Test
         run: |
