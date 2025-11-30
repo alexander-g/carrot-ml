@@ -13,15 +13,33 @@ export type TreeringPostprocessingResult = {
     ring_points_xy: PairedPaths;
 }
 
+export type CellsPostprocessingResult = {
+    cellmap_workshape_png: File;
+    instancemap_workshape_png: File;
+}
+
+export type CombinedPostprocessingResult = {
+    cellmap_workshape_png: File;
+    instancemap_workshape_png: File;
+    
+    treeringmap_workshape_png: File;
+    ring_points_xy: PairedPaths;
+
+    ringmap_workshape_png: File;
+}
+
+
 
 export declare class CARROT_Postprocessing {
     private constructor();
 
-    postprocess_treeringmapfile(
-        treeringmap: File,
+
+    postprocess_combined(
+        cellmap:     File|null,
+        treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<TreeringPostprocessingResult | Error>;
+    ): Promise<CombinedPostprocessingResult | CellsPostprocessingResult | TreeringPostprocessingResult | Error>;
 }
 
 
