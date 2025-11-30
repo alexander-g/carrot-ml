@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -65,3 +66,56 @@ std::vector<bool> points_in_polygon(const Points& points, const Path& polygon) {
     return output;
 }
 
+/** Euclidean distance */
+double distance(const Point& p0, const Point& p1) {
+    const double d0 = p0[0] - p1[0];
+    const double d1 = p0[1] - p1[1];
+    return sqrt(  d0*d0 + d1*d1  );
+}
+
+std::vector<double> points_to_point_distances(const Points& points, const Point& p) {
+    std::vector<double> output;
+    output.reserve(points.size());
+    for(const Point& p_i: points)
+        output.push_back( distance(p_i, p) );
+    return output;
+}
+
+std::optional<double> closest_distance(const Points& points, const Point& p) {
+    if(points.empty())
+        return std::nullopt;
+
+    const auto distances = points_to_point_distances(points, p);
+    return *std::min_element(distances.begin(), distances.end());
+}
+
+std::optional<Point> average_points(const Points& points) {
+    if(points.size() == 0)
+        return std::nullopt;
+    
+    Point sum = {0,0};
+    for(const Point& p: points){
+        sum[0] += p[0];
+        sum[1] += p[1];
+    }
+    const int n = points.size();
+    return Point{sum[0] / n, sum[1] / n};
+}
+
+
+/** Rescale points from one image shape to another.
+    Points are expected to be in XY format, shapes in HW. */
+Points scale_points(
+    const Points& points_xy, 
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape
+) {
+    const std::pair<double, double> scale = {
+        to_shape.first  / (double)from_shape.first,    // height
+        to_shape.second / (double)from_shape.second    // width
+    };
+    Points output;
+    for(const Point& point: points_xy)
+        output.push_back({point[0] * scale.second, point[1] * scale.first});
+    return output;
+}

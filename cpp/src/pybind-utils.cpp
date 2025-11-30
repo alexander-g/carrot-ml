@@ -85,3 +85,26 @@ py::list vec_paired_paths_to_numpy(const PairedPaths& pp) {
 py::bytes buffer_to_bytes(const Buffer& b) {
     return py::bytes((const char*)b.data, (size_t)b.size);
 }
+
+
+py::list cell_info_to_py(const std::vector<CellInfo>& cell_info) {
+    py::list out;
+    for(const CellInfo& cell: cell_info){
+        py::dict cell_py;
+        cell_py["id"] = cell.id;
+        cell_py["box_xy"] = py::make_tuple(
+            cell.box_xy.x0, 
+            cell.box_xy.y0, 
+            cell.box_xy.x1, 
+            cell.box_xy.y1
+        );
+        cell_py["year_index"]      = cell.year_index;
+        cell_py["area_px"]         = cell.area_px;
+        cell_py["position_within"] = cell.position_within;
+        out.append(cell_py);
+    }
+        
+    return out;
+}
+
+

@@ -36,6 +36,7 @@ struct TreeringsPostprocessingResult {
     const Buffer_p treeringmap_workshape_png;
     // EigenBinaryMap treeringmap_ogshape;
 
+    // scaled to og_shape
     const PairedPaths ring_points_xy;
 
 };

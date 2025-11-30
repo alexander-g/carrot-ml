@@ -103,7 +103,7 @@ py::dict postprocess_cellmapfile_py(
     const ImageShape& workshape, 
     const ImageShape& og_shape
 ) {
-   const auto fhandle_o = FileHandle::open(path.c_str());
+    const auto fhandle_o = FileHandle::open(path.c_str());
     if(!fhandle_o)
         throw std::runtime_error("Could not open file");
     const FileHandle* fhandle = fhandle_o.value().get();
@@ -123,6 +123,69 @@ py::dict postprocess_cellmapfile_py(
         buffer_to_bytes(*output_x->cellmap_workshape_png);
     d["instancemap_workshape_png"] = 
         buffer_to_bytes(*output_x->instancemap_workshape_png);
+    return d;
+}
+
+py::dict postprocess_combined_from_files_py(
+    const std::string& cellmappath,
+    const std::string& treeringmappath,
+    const ImageShape& workshape, 
+    const ImageShape& og_shape
+) {
+    const auto expect_fhandle_cells = FileHandle::open(cellmappath.c_str());
+    const auto expect_fhandle_rings = FileHandle::open(treeringmappath.c_str());
+    if(!expect_fhandle_cells)
+        throw std::runtime_error("Could not open cellmap file");
+    if(!expect_fhandle_rings)
+        throw std::runtime_error("Could not open treerings file");
+    const FileHandle* fhandle_cells = expect_fhandle_cells.value().get();
+    const FileHandle* fhandle_rings = expect_fhandle_rings.value().get();
+
+
+    const auto expect_output_cells = postprocess_cellmapfile(
+        fhandle_cells->size, 
+        (const void*) &fhandle_cells->read_callback, 
+        (void*) fhandle_cells, 
+        workshape,
+        og_shape
+    );
+    if(!expect_output_cells)
+        throw std::runtime_error("Cells postprocessing failed");
+    const CellsPostprocessingResult& output_cells = *expect_output_cells;
+
+    const auto expect_output_rings = postprocess_treeringmapfile(
+        fhandle_rings->size, 
+        (const void*) &fhandle_rings->read_callback, 
+        (void*) fhandle_rings, 
+        workshape,
+        og_shape
+    );
+    if(!expect_output_rings)
+        throw std::runtime_error("Treerings postprocessing failed");
+    const TreeringsPostprocessingResult& output_rings = *expect_output_rings;
+
+    const auto expect_output_combined = 
+        postprocess_combined(
+            output_rings.ring_points_xy, 
+            output_cells.cells, 
+            workshape,
+            og_shape
+        );
+    if(!expect_output_combined)
+        throw std::runtime_error("Combined postprocessing failed");
+    const CombinedPostprocessingResult& output_combined = *expect_output_combined;
+
+
+    py::dict d;
+    d["cellmap_workshape_png"] = 
+        buffer_to_bytes(*output_cells.cellmap_workshape_png);
+    d["instancemap_workshape_png"] = 
+        buffer_to_bytes(*output_cells.instancemap_workshape_png);
+    d["treeringmap_workshape_png"] = 
+        buffer_to_bytes(*output_rings.treeringmap_workshape_png);
+    d["ringmap_workshape_png"] =
+        buffer_to_bytes(*output_combined.ringmap_rgb_png);
+    d["cell_info"] = cell_info_to_py(output_combined.cell_info);
     return d;
 }
 
@@ -182,6 +245,14 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         py::arg("og_shape")
     );
 
+    m.def(
+        "postprocess_combined",
+        postprocess_combined_from_files_py,
+        py::arg("cellmappath").noconvert(),
+        py::arg("treeringmappath").noconvert(),
+        py::arg("workshape"),
+        py::arg("og_shape")
+    );
     
 }
 

@@ -71,3 +71,32 @@ Deno.test('postprocess_cellmapfile', async () => {
     asserts.assertNotInstanceOf(output1, Error)
 })
 
+
+Deno.test('postprocess_combined', async () => {
+    const module = await initialize()
+
+    const invalidfile = new File([], 'invalid.png')
+    const worksize = {width: 555, height:555}
+    const og_size = {width:2048, height:2048}
+
+    const output0 = await module.postprocess_combined(invalidfile, invalidfile, worksize, og_size)
+    asserts.assertInstanceOf(output0, Error)
+    // make sure no c++ error
+    asserts.assert(
+        !output0.message.toLowerCase().includes('aborted'), 
+        'Not a clean C++ exit'
+    )
+
+
+    const filepath0 = import.meta.resolve('./assets/cellmap3-combined.png').replace('file://','')
+    const cellmapfile0 = new File([Deno.readFileSync(filepath0)], 'cellmap3-combined.png')
+    const filepath1 = import.meta.resolve('./assets/treeringsmap3-combined.png').replace('file://','')
+    const treeringmapfile1 = new File([Deno.readFileSync(filepath1)], 'treeringsmap3-combined.png')
+
+    const output1 = await module.postprocess_combined(cellmapfile0, treeringmapfile1, worksize, og_size)
+    console.log()
+    //console.log(output1)
+    asserts.assertNotInstanceOf(output1, Error)
+})
+
+
