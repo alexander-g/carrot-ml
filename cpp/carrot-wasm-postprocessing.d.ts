@@ -33,24 +33,13 @@ export type CombinedPostprocessingResult = {
 export declare class CARROT_Postprocessing {
     private constructor();
 
-    postprocess_treeringmapfile(
-        treeringmap: File,
-        work_size:   ImageSize,
-        og_size:     ImageSize,
-    ): Promise<TreeringPostprocessingResult | Error>;
-
-    postprocess_cellmapfile(
-        cellmap:     File,
-        work_size:   ImageSize,
-        og_size:     ImageSize,
-    ): Promise<CellsPostprocessingResult | Error>;
 
     postprocess_combined(
-        cellmap:     File,
-        treeringmap: File,
+        cellmap:     File|null,
+        treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<CombinedPostprocessingResult | Error>;
+    ): Promise<CombinedPostprocessingResult | CellsPostprocessingResult | TreeringPostprocessingResult | Error>;
 }
 
 
