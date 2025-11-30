@@ -93,7 +93,7 @@ type CARROT_Postprocessing_WASM = {
     
     HEAPU8: {
         set: (src:Uint8Array, dst:pointer) => void,
-        slice: (start:number, end:number) => Uint8Array,
+        slice: (start:number, end:number) => Uint8Array<ArrayBuffer>,
         [i:number]: number,
     }
     HEAP32: {
@@ -125,201 +125,25 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             wasm.addFunction(this.#read_file_callback, 'iiijj');
     }
 
-    async postprocess_treeringmapfile(
-        treeringmap: File,
-        work_size:   ImageSize,
-        og_size:     ImageSize,
-    ): Promise<TreeringPostprocessingResult | Error> {
-
-        const handle:number = this.#handle_counter++;
-        this.#read_file_callback_table[handle] = treeringmap;
-
-        const treeringmap_workshape_png_pp:pointer     = this.#malloc(8);
-        const treeringmap_workshape_png_size_p:pointer = this.#malloc(8);
-        const ring_points_xy_json_pp:pointer           = this.#malloc(8);
-        const ring_points_xy_json_size_p:pointer       = this.#malloc(8);
-        const rc_ptr:pointer = this.#malloc(4, /*fill=*/255)
-
-        let ring_points_xy_json_p:pointer|undefined = undefined;
-        let treeringmap_workshape_png_p:pointer|undefined = undefined;
-
-        try {
-
-        let rc:number = await this.wasm._postprocess_treeringmapfile_wasm(
-            treeringmap.size, 
-            this.#read_file_callback_ptr, 
-            handle, 
-            work_size.width, 
-            work_size.height,
-            og_size.width,
-            og_size.height,
-            treeringmap_workshape_png_pp,
-            treeringmap_workshape_png_size_p,
-            ring_points_xy_json_pp,
-            ring_points_xy_json_size_p,
-            rc_ptr
-        )
-        // NOTE: the wasm function above returns before the execution is 
-        // finished because of async issues, so currently polling until done
-        while(this.wasm.Asyncify.currData != null)
-            await wait(1);
-        
-        rc = (rc == 0)? this.wasm.HEAP32[rc_ptr >> 2]! : rc;
-        if(rc != 0)
-            return new Error(`WASM error code = ${rc}`)
-
-        ring_points_xy_json_p = this.wasm.HEAP32[ring_points_xy_json_pp >> 2]!;
-        const ring_points_xy_json_size:number = 
-            Number(this.wasm.HEAP64[ring_points_xy_json_size_p >> 3]);
-        const ring_points_xy_json_u8:Uint8Array = this.wasm.HEAPU8.slice(
-            ring_points_xy_json_p, 
-            ring_points_xy_json_p + ring_points_xy_json_size
-        )
-        const obj:unknown = 
-            JSON.parse(new TextDecoder().decode(ring_points_xy_json_u8));
-        const paired_paths:PairedPaths|null = validate_paired_paths(obj)
-        if(paired_paths == null)
-            return new Error('WASM-JS communication inconcistencies')
-        
-        
-        treeringmap_workshape_png_p = 
-            this.wasm.HEAP32[treeringmap_workshape_png_pp >> 2]!;
-        const treeringmap_workshape_png_size:number = 
-            Number(this.wasm.HEAP64[treeringmap_workshape_png_size_p >> 3]);
-        const treeringmap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-            treeringmap_workshape_png_p, 
-            treeringmap_workshape_png_p + treeringmap_workshape_png_size
-        )
-
-        return {
-            // @ts-ignore typescript is annoying
-            treeringmap_workshape_png: new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
-            ring_points_xy: paired_paths,
-        }
-        
-        } catch (e) {
-            console.error('Unexpected error:', e)
-            return e as Error;
-        } finally {
-            this.wasm._free(treeringmap_workshape_png_pp);
-            this.wasm._free(treeringmap_workshape_png_size_p);
-            this.wasm._free(ring_points_xy_json_pp);
-            this.wasm._free(ring_points_xy_json_size_p);
-            this.wasm._free(rc_ptr);
-            delete this.#read_file_callback_table[handle];
-
-            if(ring_points_xy_json_p != undefined) 
-                this.wasm._free_output(ring_points_xy_json_pp);
-            
-            console.warn('TODO: free output "treeringmap_workshape_png_p"!')
-            //if(treeringmap_workshape_png_p != undefined)
-            
-        }
-        
-        return new Error('NOT IMPLEMENTED')
-    }
-
-    async postprocess_cellmapfile(
-        cellmap:     File,
-        work_size:   ImageSize,
-        og_size:     ImageSize,
-    ): Promise<CellsPostprocessingResult | Error> {
-
-        const handle:number = this.#handle_counter++;
-        this.#read_file_callback_table[handle] = cellmap;
-
-        const cellmap_workshape_png_pp:pointer         = this.#malloc(8);
-        const cellmap_workshape_png_size_p:pointer     = this.#malloc(8);
-        const instancemap_workshape_png_pp:pointer     = this.#malloc(8);
-        const instancemap_workshape_png_size_p:pointer = this.#malloc(8);
-        const rc_ptr:pointer = this.#malloc(4, /*fill=*/255)
-
-        let cellmap_workshape_png_p:pointer|undefined = undefined;
-        let instancemap_workshape_png_p:pointer|undefined = undefined;
-
-
-        try {
-
-        let rc:number = await this.wasm._postprocess_cellmapfile_wasm(
-            cellmap.size, 
-            this.#read_file_callback_ptr, 
-            handle, 
-            work_size.width, 
-            work_size.height,
-            og_size.width,
-            og_size.height,
-            cellmap_workshape_png_pp,
-            cellmap_workshape_png_size_p,
-            instancemap_workshape_png_pp,
-            instancemap_workshape_png_size_p,
-            rc_ptr
-        )
-        // NOTE: the wasm function above returns before the execution is 
-        // finished because of async issues, so currently polling until done
-        while(this.wasm.Asyncify.currData != null)
-            await wait(1);
-
-        rc = (rc == 0)? this.wasm.HEAP32[rc_ptr >> 2]! : rc;
-        if(rc != 0)
-            return new Error(`WASM error code = ${rc}`)
-
-
-        cellmap_workshape_png_p = 
-            this.wasm.HEAP32[cellmap_workshape_png_pp >> 2]!;
-        const cellmap_workshape_png_size:number = 
-            Number(this.wasm.HEAP64[cellmap_workshape_png_size_p >> 3]);
-        const cellmap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-            cellmap_workshape_png_p, 
-            cellmap_workshape_png_p + cellmap_workshape_png_size
-        )
-
-        instancemap_workshape_png_p = 
-            this.wasm.HEAP32[instancemap_workshape_png_pp >> 2]!;
-        const instancemap_workshape_png_size:number = 
-            Number(this.wasm.HEAP64[instancemap_workshape_png_size_p >> 3]);
-        const instancemap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-            instancemap_workshape_png_p, 
-            instancemap_workshape_png_p + instancemap_workshape_png_size
-        )
-
-
-        return {
-            cellmap_workshape_png: 
-                // @ts-ignore typescript is annoying
-                new File([cellmap_workshape_png_u8], 'cellmap.png'),
-            instancemap_workshape_png: 
-                // @ts-ignore typescript is annoying
-                new File([instancemap_workshape_png_u8], 'instancemap.png'),
-        }
-
-        } catch (e) {
-            console.error('Unexpected error:', e)
-            return e as Error;
-        } finally {
-            this.wasm._free(cellmap_workshape_png_pp);
-            this.wasm._free(cellmap_workshape_png_size_p);
-            this.wasm._free(instancemap_workshape_png_pp);
-            this.wasm._free(instancemap_workshape_png_size_p);
-            this.wasm._free(rc_ptr);
-            delete this.#read_file_callback_table[handle];
-
-            if(cellmap_workshape_png_p != undefined) 
-                this.wasm._free_output(cellmap_workshape_png_pp);
-            if(instancemap_workshape_png_p != undefined) 
-                this.wasm._free_output(instancemap_workshape_png_pp);
-        }
-    }
 
     async postprocess_combined(
-        cellmap:     File,
-        treeringmap: File,
+        cellmap:     File|null,
+        treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<CombinedPostprocessingResult | Error> {
-        const handle_cells:number = this.#handle_counter++;
-        this.#read_file_callback_table[handle_cells] = cellmap;
-        const handle_rings:number = this.#handle_counter++;
-        this.#read_file_callback_table[handle_rings] = treeringmap;
+    ): Promise<CombinedPostprocessingResult | CellsPostprocessingResult | TreeringPostprocessingResult | Error> {
+
+        let cells_handle:number = 0;
+        let rings_handle:number = 0;
+        if(cellmap){
+            cells_handle = this.#handle_counter++;
+            this.#read_file_callback_table[cells_handle] = cellmap;
+        }
+        if(treeringmap){
+            rings_handle = this.#handle_counter++;
+            this.#read_file_callback_table[rings_handle] = treeringmap;
+        }
+
 
         const rc_ptr:pointer = this.#malloc(4, /*fill=*/255)
 
@@ -343,12 +167,13 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
         try {
             let rc:number = await this.wasm._postprocess_combined_wasm(
-                cellmap.size, 
+                cellmap?.size ?? 0, 
                 this.#read_file_callback_ptr, 
-                handle_cells, 
-                treeringmap.size, 
+                cells_handle, 
+                treeringmap?.size ?? 0, 
                 this.#read_file_callback_ptr, 
-                handle_rings, 
+                rings_handle, 
+
                 work_size.width, 
                 work_size.height,
                 og_size.width,
@@ -376,73 +201,104 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             if(rc != 0)
                 return new Error(`WASM error code = ${rc}`)
 
+            let cellmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
+            let instancemap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
+            if(cellmap) {
+                cellmap_workshape_png_p = 
+                    this.wasm.HEAP32[cellmap_workshape_png_pp >> 2]!;
+                const cellmap_workshape_png_size:number = 
+                    Number(this.wasm.HEAP64[cellmap_workshape_png_size_p >> 3]);
+                cellmap_workshape_png_u8 = this.wasm.HEAPU8.slice(
+                    cellmap_workshape_png_p, 
+                    cellmap_workshape_png_p + cellmap_workshape_png_size
+                )
 
-            cellmap_workshape_png_p = 
-                this.wasm.HEAP32[cellmap_workshape_png_pp >> 2]!;
-            const cellmap_workshape_png_size:number = 
-                Number(this.wasm.HEAP64[cellmap_workshape_png_size_p >> 3]);
-            const cellmap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-                cellmap_workshape_png_p, 
-                cellmap_workshape_png_p + cellmap_workshape_png_size
-            )
-
-            instancemap_workshape_png_p = 
-                this.wasm.HEAP32[instancemap_workshape_png_pp >> 2]!;
-            const instancemap_workshape_png_size:number = 
-                Number(this.wasm.HEAP64[instancemap_workshape_png_size_p >> 3]);
-            const instancemap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-                instancemap_workshape_png_p, 
-                instancemap_workshape_png_p + instancemap_workshape_png_size
-            )
-
-            treeringmap_workshape_png_p = 
-                this.wasm.HEAP32[treeringmap_workshape_png_pp >> 2]!;
-            const treeringmap_workshape_png_size:number = 
-                Number(this.wasm.HEAP64[treeringmap_workshape_png_size_p >> 3]);
-            const treeringmap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-                treeringmap_workshape_png_p, 
-                treeringmap_workshape_png_p + treeringmap_workshape_png_size
-            )
-
-            ring_points_xy_json_p = this.wasm.HEAP32[ring_points_xy_json_pp >> 2]!;
-            const ring_points_xy_json_size:number = 
-                Number(this.wasm.HEAP64[ring_points_xy_json_size_p >> 3]);
-            const ring_points_xy_json_u8:Uint8Array = this.wasm.HEAPU8.slice(
-                ring_points_xy_json_p, 
-                ring_points_xy_json_p + ring_points_xy_json_size
-            )
-            const obj:unknown = 
-                JSON.parse(new TextDecoder().decode(ring_points_xy_json_u8));
-            const paired_paths:PairedPaths|null = validate_paired_paths(obj)
-            if(paired_paths == null)
-                return new Error('WASM-JS communication inconcistencies')
-
-            ringmap_workshape_png_p = 
-                this.wasm.HEAP32[ringmap_workshape_png_pp >> 2]!;
-            const ringmap_workshape_png_size:number = 
-                Number(this.wasm.HEAP64[ringmap_workshape_png_size_p >> 3]);
-            const ringmap_workshape_png_u8:Uint8Array = this.wasm.HEAPU8.slice(
-                ringmap_workshape_png_p, 
-                ringmap_workshape_png_p + ringmap_workshape_png_size
-            )
-
-            return {
-                cellmap_workshape_png: 
-                    // @ts-ignore typescript is annoying
-                    new File([cellmap_workshape_png_u8], 'cellmap.png'),
-                instancemap_workshape_png: 
-                    // @ts-ignore typescript is annoying
-                    new File([instancemap_workshape_png_u8], 'instancemap.png'),
-                
-                treeringmap_workshape_png:
-                    // @ts-ignore typescript is annoying
-                    new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
-                ring_points_xy: paired_paths,
-
-                ringmap_workshape_png:
-                    // @ts-ignore typescript is annoying
-                    new File([ringmap_workshape_png_u8], 'ringmap.png'),
+                instancemap_workshape_png_p = 
+                    this.wasm.HEAP32[instancemap_workshape_png_pp >> 2]!;
+                const instancemap_workshape_png_size:number = 
+                    Number(this.wasm.HEAP64[instancemap_workshape_png_size_p >> 3]);
+                instancemap_workshape_png_u8 = this.wasm.HEAPU8.slice(
+                    instancemap_workshape_png_p, 
+                    instancemap_workshape_png_p + instancemap_workshape_png_size
+                )
             }
+
+
+            let treeringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null
+            let paired_paths:PairedPaths|null = null;
+            if(treeringmap) {
+                treeringmap_workshape_png_p = 
+                    this.wasm.HEAP32[treeringmap_workshape_png_pp >> 2]!;
+                const treeringmap_workshape_png_size:number = 
+                    Number(this.wasm.HEAP64[treeringmap_workshape_png_size_p >> 3]);
+                treeringmap_workshape_png_u8 = this.wasm.HEAPU8.slice(
+                    treeringmap_workshape_png_p, 
+                    treeringmap_workshape_png_p + treeringmap_workshape_png_size
+                )
+
+                ring_points_xy_json_p = this.wasm.HEAP32[ring_points_xy_json_pp >> 2]!;
+                const ring_points_xy_json_size:number = 
+                    Number(this.wasm.HEAP64[ring_points_xy_json_size_p >> 3]);
+                const ring_points_xy_json_u8:Uint8Array = this.wasm.HEAPU8.slice(
+                    ring_points_xy_json_p, 
+                    ring_points_xy_json_p + ring_points_xy_json_size
+                )
+                const obj:unknown = 
+                    JSON.parse(new TextDecoder().decode(ring_points_xy_json_u8));
+                paired_paths = validate_paired_paths(obj)
+                if(paired_paths == null)
+                    return new Error('WASM-JS communication inconcistencies')
+            }
+
+
+            let ringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
+            if(cellmap && treeringmap) {
+                ringmap_workshape_png_p = 
+                    this.wasm.HEAP32[ringmap_workshape_png_pp >> 2]!;
+                const ringmap_workshape_png_size:number = 
+                    Number(this.wasm.HEAP64[ringmap_workshape_png_size_p >> 3]);
+                ringmap_workshape_png_u8 = this.wasm.HEAPU8.slice(
+                    ringmap_workshape_png_p, 
+                    ringmap_workshape_png_p + ringmap_workshape_png_size
+                )
+            }
+
+
+
+            if(cellmap_workshape_png_u8 
+            && instancemap_workshape_png_u8 
+            && treeringmap_workshape_png_u8 
+            && paired_paths 
+            && ringmap_workshape_png_u8)
+                return {
+                    cellmap_workshape_png: 
+                        new File([cellmap_workshape_png_u8], 'cellmap.png'),
+                    instancemap_workshape_png: 
+                        new File([instancemap_workshape_png_u8], 'instancemap.png'),
+                    
+                    treeringmap_workshape_png:
+                        new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
+                    ring_points_xy: paired_paths,
+
+                    ringmap_workshape_png:
+                        new File([ringmap_workshape_png_u8], 'ringmap.png'),
+                }
+            else if(cellmap_workshape_png_u8 && instancemap_workshape_png_u8)
+                return {
+                    cellmap_workshape_png: 
+                        new File([cellmap_workshape_png_u8], 'cellmap.png'),
+                    instancemap_workshape_png: 
+                        new File([instancemap_workshape_png_u8], 'instancemap.png'),
+                }
+            else if(treeringmap_workshape_png_u8 && paired_paths)
+                return {
+                    treeringmap_workshape_png:
+                        new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
+                    ring_points_xy: paired_paths,
+                }
+            else
+                return new Error('Unexpected error')
+
         } catch (e) {
             console.error('Unexpected error:', e)
             return e as Error;
@@ -458,8 +314,10 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             this.wasm._free(ring_points_xy_json_size_p);
             this.wasm._free(ringmap_workshape_png_pp);
             this.wasm._free(ringmap_workshape_png_size_p);
-            delete this.#read_file_callback_table[handle_cells];
-            delete this.#read_file_callback_table[handle_rings];
+            if(cells_handle != 0)
+                delete this.#read_file_callback_table[cells_handle];
+            if(rings_handle != 0)
+                delete this.#read_file_callback_table[rings_handle];
 
             if(cellmap_workshape_png_p != undefined) 
                 this.wasm._free_output(cellmap_workshape_png_pp);
@@ -478,7 +336,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
 
 
-    #handle_counter = 0;
+    #handle_counter = 1;
 
     #read_file_callback_ptr:pointer;
     #read_file_callback_table: Record<number, File> = {};
