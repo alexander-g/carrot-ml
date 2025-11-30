@@ -31,7 +31,7 @@ jobs:
       
       - name: pytest
         run: |
-          pip install -r requirements.frozen.txt
+          pip install --index-url https://download.pytorch.org/whl/cpu -r requirements.frozen.txt
           ./run_tests.sh
 
   build-wasm:
