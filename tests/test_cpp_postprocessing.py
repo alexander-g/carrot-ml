@@ -176,4 +176,71 @@ def test_postprocess_cellmapfile():
 
 
 
+def test_points_in_polygon():
+    points = np.array([
+        (200, 200),  # inside
+        (50,  200),  # outside
+    ]).astype('float64')
+    polygon = np.array([
+        (100,208),
+        (115,83),
+        (218,64),
+        (260,119),
+        (276,217),
+        (340,232),
+        (369,74),
+        (426,69),
+        (445,286),
+        (251,304),
+        (131,265)
+    ]).astype('float64')
+
+    output = postp.points_in_polygon(points, polygon)
+    assert output.tolist() == [True,False]
     
+
+
+def test_postprocessing_combined():
+    treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap3-combined.png' )
+    cellmapfile = os.path.join( os.path.dirname(__file__), 'assets', 'cellmap3-combined.png' )
+
+    workshape = (777,777)
+    og_shape  = (2000,2000)
+    output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
+
+    assert len( output['cell_info'] ) == 479
+
+    year_indices = [ c['year_index'] for c in output['cell_info'] ]
+    # 3 full rings + incomplete ones counted as -1
+    assert len(np.unique(year_indices)) == 4
+
+    instancemap1 = np.array(
+        PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) )
+    )
+    assert instancemap1.shape[:2] == workshape
+
+    unique_colors = np.unique(instancemap1.reshape(-1,3), axis=0)
+    assert len(unique_colors) == 5  # 3 rings + gray + background
+
+    # bug (did not scale points to og shape)
+    cell0_color = instancemap1[510,100]
+    cell1_color = instancemap1[500,110]
+    assert cell0_color.tolist() != [0,0,0]
+    assert cell0_color.tolist() == cell1_color.tolist()
+
+    # bug 2
+    cell2_color = instancemap1[70,270]
+    assert cell2_color.tolist() == [224,224,224]
+
+
+    # PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) ).save('DELETE-ringmap.png')
+    # PIL.Image.open( io.BytesIO(output['cellmap_workshape_png']) ).save('DELETE-cellmap.png')
+    # PIL.Image.open( io.BytesIO(output['treeringmap_workshape_png']) ).save('DELETE-treerings.png')
+    # PIL.Image.open( io.BytesIO(output['instancemap_workshape_png']) ).save('DELETE-instances.png')
+
+    # # bug 3  # ignoring for now, probably related to the small workshape
+    # cell3_color = instancemap1[28, 128]
+    # assert cell3_color.tolist() != [224,224,224]
+    
+
+

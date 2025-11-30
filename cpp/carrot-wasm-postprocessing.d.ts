@@ -18,6 +18,16 @@ export type CellsPostprocessingResult = {
     instancemap_workshape_png: File;
 }
 
+export type CombinedPostprocessingResult = {
+    cellmap_workshape_png: File;
+    instancemap_workshape_png: File;
+    
+    treeringmap_workshape_png: File;
+    ring_points_xy: PairedPaths;
+
+    ringmap_workshape_png: File;
+}
+
 
 
 export declare class CARROT_Postprocessing {
@@ -34,6 +44,13 @@ export declare class CARROT_Postprocessing {
         work_size:   ImageSize,
         og_size:     ImageSize,
     ): Promise<CellsPostprocessingResult | Error>;
+
+    postprocess_combined(
+        cellmap:     File,
+        treeringmap: File,
+        work_size:   ImageSize,
+        og_size:     ImageSize,
+    ): Promise<CombinedPostprocessingResult | Error>;
 }
 
 

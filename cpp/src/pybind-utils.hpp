@@ -4,6 +4,7 @@
 #include <pybind11/numpy.h>
 
 #include "./postprocessing.hpp"
+#include "./postprocessing_cells.hpp"
 #include "../wasm-big-image/src/util.hpp"
 
 
@@ -21,6 +22,9 @@ Paths paths_numpy_to_stdvec(py::list paths);
 /** std::vector<std::pair<double,double>> to ndarray shape [N,2] */
 py_f64_array path_stdvec_to_numpy(const Path& path);
 
+/** std::vector<bool> to ndarray shape [N], dtype bool */
+py_bool_array bool_stdvec_to_numpy(const std::vector<bool>& boolarray);
+
 /** std::vector<std::vector<...> to list of ndarrays of shape [N,2] */
 py::list paths_stdvec_to_numpy(const Paths& paths);
 
@@ -32,6 +36,9 @@ py::list vec_paired_paths_to_numpy(const PairedPaths& pp);
 
 
 py::bytes buffer_to_bytes(const Buffer& b);
+
+/** CellInfo to tp.List[tp.Dict[str, tp.Any]] */
+py::list cell_info_to_py(const std::vector<CellInfo>& cell_info);
 
 
 #endif

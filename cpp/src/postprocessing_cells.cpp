@@ -3,10 +3,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <ranges>
 
 
-#include "./postprocessing_cells.hpp"
 #include "./image-utils.hpp"
+#include "./postprocessing_cells.hpp"
+#include "./utils.hpp"
+
 
 
 
@@ -71,15 +74,47 @@ EigenRGBMap colorize_instancemap(
 }
 
 
+const std::vector<std::array<uint8_t, 3>> COLORS{
+    // (255,255,255),
+    { 23,190,207},
+    {255,127, 14},
+    { 44,160, 44},
+    {214, 39, 40},
+    {148,103,189},
+    {140, 86, 75},
+    {188,189, 34},
+    {227,119,194},
+};
+const std::array<uint8_t, 3> GRAY{224, 224, 224};
 
-EigenRGBMap classmap_to_instancemap_rgb(const EigenBinaryMap& mask) {
-    const CCResult cc = connected_components(mask);
-    printf("TODO: remove small objects\n");
+std::optional<EigenRGBMap> colorize_ringmap(
+    const CCResult& cc,
+    const std::vector<CellInfo>& cell_info,
+    const ImageShape& shape
+) {
+    EigenRGBMap output(shape.first, shape.second, 3);
+    output.setZero();
+    if(cc.dfs_results.size() != cell_info.size())
+        return std::nullopt;
 
-    const ImageShape shape{mask.dimension(0), mask.dimension(1)};
-    EigenRGBMap rgbmap = colorize_instancemap(cc, shape);
-    return rgbmap;
+    for(int i = 0; i < cc.dfs_results.size(); i++) {
+        const DFS_Result& dfs = cc.dfs_results[i];
+        const CellInfo& info  = cell_info[i];
+        
+        const auto rgb = 
+            (info.year_index < 0)
+            ? GRAY
+            : COLORS[info.year_index % COLORS.size()];
+
+        for(const Index2D& index: dfs.visited) {
+            output(index.i, index.j, 0) = rgb[0];
+            output(index.i, index.j, 1) = rgb[1];
+            output(index.i, index.j, 2) = rgb[2];
+        }
+    }
+    return output;
 }
+
 
 
 std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
@@ -116,13 +151,16 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     
     const EigenBinaryMap& mask = expect_mask.value();
 
+    const CCResult cc_cells = connected_components(mask);
+    printf("TODO: remove small objects\n"); fflush(stdout);
+    const ImageShape shape{mask.dimension(0), mask.dimension(1)};
+    const EigenRGBMap instancemap_rgb = colorize_instancemap(cc_cells, shape);
 
-    const EigenRGBMap instancemap = classmap_to_instancemap_rgb(mask);
     const std::expected<Buffer_p, int> instancemap_workshape_png_x = 
         png_compress_image(
-            instancemap.data(), 
-            /*width=*/    instancemap.dimension(1),
-            /*height=*/   instancemap.dimension(0),
+            instancemap_rgb.data(), 
+            /*width=*/    instancemap_rgb.dimension(1),
+            /*height=*/   instancemap_rgb.dimension(0),
             /*channels=*/ 3
         );
     if(!instancemap_workshape_png_x)
@@ -140,8 +178,169 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     
     return CellsPostprocessingResult{
         /*cellmap_workshape_png     = */ cellmap_workshape_png_x.value(),
-        /*instancemap_workshape_png = */ instancemap_workshape_png_x.value()
+        /*instancemap_workshape_png = */ instancemap_workshape_png_x.value(),
+        /*cells                     = */ std::move(cc_cells)
     };
+}
+
+
+
+
+Path polygon_from_treeringspaths(const PathPair& treering) {
+    return concat_copy(
+        treering.first,
+        std::views::reverse(treering.second)
+    );
+}
+
+std::vector<Path> polygons_from_treeringspaths(const PairedPaths& treering_paths) {
+    std::vector<Path> output;
+    output.reserve(treering_paths.size());
+
+    for(const PathPair& treering: treering_paths)
+        output.push_back(
+            concat_copy(
+                treering.first,
+                std::views::reverse(treering.second)
+            )
+        );
+    
+    return output;
+}
+
+std::optional<Box> box_from_dfs(const DFS_Result& dfs) {
+    if(dfs.visited.empty())
+        return std::nullopt;
+
+    Box output{ INFINITY, INFINITY, -INFINITY, -INFINITY };
+    for(const Index2D& index: dfs.visited){
+        output.x0 = std::min(output.x0, (double)index.j);
+        output.y0 = std::min(output.y0, (double)index.i);
+        output.x1 = std::max(output.x1, (double)index.j);
+        output.y1 = std::max(output.y1, (double)index.i);
+    }
+    return output;
+}
+
+
+Points indices_to_points(const Indices2D& indices){
+    Points points;
+    for(const Index2D& index: indices)
+        // yx to xy
+        points.push_back({ (double)index.j, (double)index.i });
+    return points;
+}
+
+std::optional<double> estimate_position_within_treering(
+    const Points&   cellpoints, 
+    const PathPair& treering
+) {
+    if(treering.first.empty() || treering.second.empty() || cellpoints.empty())
+        return std::nullopt;
+
+    return std::nullopt;
+    const Point centroid = *average_points(cellpoints);
+
+    const double closest0 = *closest_distance(treering.first, centroid);
+    const double closest1 = *closest_distance(treering.second, centroid);
+    const double sum = closest0 + closest1;
+    if(sum <= 0)
+        return std::nullopt;
+
+    return closest0 / sum;
+}
+
+
+int count_positive(const std::vector<bool>& x) {
+    int count = 0;
+    for(const bool i: x)
+        count += i;
+    return count;
+}
+
+
+std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
+    const PairedPaths& treering_paths,
+    const CCResult&    cells,
+    const ImageShape&  workshape,
+    const ImageShape&  og_shape
+) {
+    const int ncells = cells.dfs_results.size();
+    const std::vector<Path> treering_polygons = 
+        polygons_from_treeringspaths(treering_paths);
+
+    std::vector<CellInfo> cell_info;
+    cell_info.reserve(ncells);
+
+    for(int i = 0; i < ncells; i++){
+        const DFS_Result& dfs = cells.dfs_results[i];
+        const Points cellpoints = scale_points(
+            indices_to_points(dfs.visited),
+            workshape,
+            og_shape
+        );
+        const int npixels = cellpoints.size();
+        if(npixels == 0) // should not happen
+            continue;
+
+        int remaining = npixels;
+
+        int largest_overlap_px = 0;
+        int largest_overlapping_treering = -1;
+
+        for(int j = 0; j < treering_polygons.size(); j++){
+            const Path& treering_polygon = treering_polygons[j];
+            const std::vector<bool> points_inside = 
+                points_in_polygon(cellpoints, treering_polygon);
+            const int n_inside = count_positive(points_inside);
+
+            if(n_inside > largest_overlap_px) {
+                largest_overlap_px = n_inside;
+                largest_overlapping_treering = j;
+            }
+
+            remaining -= n_inside;
+            if(remaining <= largest_overlap_px)
+                break;
+        }
+        if(remaining > largest_overlap_px){
+            // all treerings processed but only a minority of cell pixels overlap
+            // with a ring, this means its mostly outside / indeterminate
+            largest_overlap_px = remaining;
+            largest_overlapping_treering = -1;
+        }
+
+        const double position_within = 
+            (largest_overlapping_treering >= 0)
+            ? estimate_position_within_treering(
+                cellpoints, 
+                treering_paths[largest_overlapping_treering]
+              ).value_or(-1.0)
+            : -1.0;
+
+        cell_info.push_back(CellInfo{
+            .id         = i,
+            .box_xy     = *box_from_dfs(dfs),
+            .year_index = largest_overlapping_treering,
+            .area_px    = (double)npixels,
+            .position_within = position_within
+        });
+    }
+
+    const auto expect_ringmap = colorize_ringmap(cells, cell_info, workshape);
+    if(!expect_ringmap)
+        return std::unexpected("Unexpected error");
+    const std::expected<Buffer_p, int> expect_ringmap_workshape_png = 
+        png_compress_image(
+            expect_ringmap->data(), 
+            /*width=*/    expect_ringmap->dimension(1),
+            /*height=*/   expect_ringmap->dimension(0),
+            /*channels=*/ 3
+        );
+    if(!expect_ringmap_workshape_png)
+        return std::unexpected("Failed to compress instancemap to png");
+
+    return CombinedPostprocessingResult{cell_info, *expect_ringmap_workshape_png};
 }
 
 

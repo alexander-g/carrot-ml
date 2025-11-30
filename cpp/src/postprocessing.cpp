@@ -32,12 +32,6 @@ typedef std::pair<int,int> IntPair;
 const Point INFPOINT = {INFINITY, INFINITY};
 
 
-/** Euclidean distance */
-double distance(const Point& p0, const Point& p1) {
-    const double d0 = p0[0] - p1[0];
-    const double d1 = p0[1] - p1[1];
-    return sqrt(  d0*d0 + d1*d1  );
-}
 
 /** Get points that are at most `distance` away from the reference point */
 Points get_neighborhood(
@@ -52,18 +46,7 @@ Points get_neighborhood(
     return output;
 }
 
-std::optional<Point> average_points(const Points& points) {
-    if(points.size() == 0)
-        return std::nullopt;
-    
-    Point sum = {0,0};
-    for(const Point& p: points){
-        sum[0] += p[0];
-        sum[1] += p[1];
-    }
-    const int n = points.size();
-    return Point{sum[0] / n, sum[1] / n};
-}
+
 
 std::optional<Point> furthest_point(const Points& points, const Point& p) {
     if(points.size() == 0)
@@ -102,13 +85,6 @@ std::optional<Point> closest_point(
     return min_p;
 }
 
-std::vector<double> points_to_point_distances(const Points& points, const Point& p) {
-    std::vector<double> output;
-    output.reserve(points.size());
-    for(const Point& p_i: points)
-        output.push_back( distance(p_i, p) );
-    return output;
-}
 
 std::optional<std::vector<double>> paired_distances(
     const Points& points0, 
@@ -165,10 +141,10 @@ std::optional<LineCoeffs> line_from_endpoint(
 
 
 
-/** Evaluate the equation ax + by + c. Point expected to be in xy format.*/
-double eval_implicit_equation(const LineCoeffs& coef, const Point& p_xy) {
+/** Evaluate the equation ax + by + c.*/
+double eval_implicit_equation(const LineCoeffs& coef, const Point& p) {
     const Vector normcoef = normalize({coef.a, coef.b});
-    return p_xy[0] * normcoef[0]  +  p_xy[1] * normcoef[1]  +  coef.c;
+    return p[0] * normcoef[0]  +  p[1] * normcoef[1]  +  coef.c;
 }
 
 /** Rotate a line by 90° counter-clockwise so that it goes through point `p` */
@@ -357,17 +333,7 @@ PathPointers get_paths_in_ray(
 
 
 
-/** Concatenate two ranges */
-template<std::ranges::input_range R1, std::ranges::input_range R2>
-auto concat_copy(const R1& a, const R2& b)
-{
-    using T = std::ranges::range_value_t<R1>;
-    std::vector<T> out;
-    out.reserve(std::ranges::size(a) + std::ranges::size(b));
-    out.insert(out.end(), std::ranges::begin(a), std::ranges::end(a));
-    out.insert(out.end(), std::ranges::begin(b), std::ranges::end(b));
-    return out;
-}
+
 
 
 Path merge_and_reorder(const Path& path0, const Path& path1) {
@@ -556,10 +522,7 @@ std::optional<int> find_next_boundary(
             if(intersection_points.size() == 0) 
                 continue;
             
-            const auto distances = points_to_point_distances(intersection_points, p0);
-            const double closest = 
-                *std::min_element(std::begin(distances), std::end(distances));
-            
+            const double closest = *closest_distance(intersection_points, p0);
             if(closest < closest_path_distance){
                 closest_path_distance = closest;
                 closest_path_index = j;
@@ -889,7 +852,7 @@ std::vector<Index2D> gather_path_coordinates(
 }
 
 
-Paths indices_to_points(std::vector<Indices2D> indicesvector) {
+Paths indices_to_points(const std::vector<Indices2D>& indicesvector) {
     Paths output;
     for(const Indices2D& indices: indicesvector){
         Path path;
@@ -930,22 +893,7 @@ Paths segmentation_to_paths(
 
 
 
-/** Rescale points from one image shape to another.
-    Points are expected to be in XY format, shapes in HW. */
-Points scale_points(
-    const Points& points_xy, 
-    const ImageShape& from_shape, 
-    const ImageShape& to_shape
-) {
-    const std::pair<double, double> scale = {
-        to_shape.first  / (double)from_shape.first,    // height
-        to_shape.second / (double)from_shape.second    // width
-    };
-    Points output;
-    for(const Point& point: points_xy)
-        output.push_back({point[0] * scale.second, point[1] * scale.first});
-    return output;
-}
+
 
 Paths scale_paths(
     const Paths& paths, 

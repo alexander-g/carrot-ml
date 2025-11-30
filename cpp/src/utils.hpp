@@ -80,3 +80,16 @@ std::optional<T> most_common(const std::vector<T>& v) {
             best = it;
     return best->first;
 }
+
+/** Concatenate two ranges */
+template<std::ranges::input_range R1, std::ranges::input_range R2>
+auto concat_copy(const R1& a, const R2& b)
+{
+    using T = std::ranges::range_value_t<R1>;
+    std::vector<T> out;
+    out.reserve(std::ranges::size(a) + std::ranges::size(b));
+    out.insert(out.end(), std::ranges::begin(a), std::ranges::end(a));
+    out.insert(out.end(), std::ranges::begin(b), std::ranges::end(b));
+    return out;
+}
+

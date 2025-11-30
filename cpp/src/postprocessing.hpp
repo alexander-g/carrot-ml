@@ -3,18 +3,12 @@
 
 #include <vector>
 
+#include "./geometry.hpp"
 #include "../wasm-morpho/src/morphology.hpp"
 #include "../wasm-big-image/src/util.hpp"
 
 
-typedef std::array<double, 2> Point;
-typedef std::array<double, 2> Vector;
-typedef std::vector<Point>    Points;
-typedef std::vector<Point>    Path;
-typedef std::vector<Path>     Paths;
-typedef std::pair<Path, Path> PathPair;
-typedef std::vector<PathPair> PairedPaths;
-typedef std::pair<int,int>    ImageShape;
+
 
 Paths merge_paths(
     const Paths&      paths, 
@@ -42,6 +36,7 @@ struct TreeringsPostprocessingResult {
     const Buffer_p treeringmap_workshape_png;
     // EigenBinaryMap treeringmap_ogshape;
 
+    // scaled to og_shape
     const PairedPaths ring_points_xy;
 
 };
