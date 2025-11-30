@@ -102,11 +102,11 @@ target_link_libraries(carrot_postprocessing_wasm PRIVATE
   morpho_core
   wasm_png
 )
-# SIMD!
-target_compile_options(wasm_png PRIVATE -O3 -msimd128 -fexceptions )
-target_compile_options(morpho_core PRIVATE -O3 -msimd128 -fexceptions )
-target_compile_options(carrot_postprocessing_core PRIVATE -O3 -msimd128 -fexceptions )
-target_compile_options(carrot_postprocessing_wasm PRIVATE -O3 -msimd128 -fexceptions )
+# SIMD! -flto also helps
+target_compile_options(wasm_png PRIVATE -O3 -msimd128 -fexceptions -flto )
+target_compile_options(morpho_core PRIVATE -O3 -msimd128 -fexceptions -flto )
+target_compile_options(carrot_postprocessing_core PRIVATE -O3 -msimd128 -fexceptions)
+target_compile_options(carrot_postprocessing_wasm PRIVATE -O3 -msimd128 -fexceptions)
 
 
 
