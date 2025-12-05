@@ -11,11 +11,26 @@ export type TreeringPostprocessingResult = {
     treeringmap_workshape_png: File;
 
     ring_points_xy: PairedPaths;
+
+    /** For internal type checking to differentiate from other result types */
+    _type: "treerings";
 }
 
 export type CellsPostprocessingResult = {
     cellmap_workshape_png: File;
     instancemap_workshape_png: File;
+
+    /** For internal type checking to differentiate from other result types */
+    _type: "cells";
+}
+
+
+export type CellInfo = {
+    id:              number;
+    box_xy:          [number,number,number,number];
+    year_index:      number;
+    area:            number;
+    position_within: number;
 }
 
 export type CombinedPostprocessingResult = {
@@ -26,6 +41,11 @@ export type CombinedPostprocessingResult = {
     ring_points_xy: PairedPaths;
 
     ringmap_workshape_png: File;
+
+    cell_info: CellInfo[];
+
+    /** For internal type checking to differentiate from other result types */
+    _type: "combined";
 }
 
 
@@ -39,7 +59,12 @@ export declare class CARROT_Postprocessing {
         treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<CombinedPostprocessingResult | CellsPostprocessingResult | TreeringPostprocessingResult | Error>;
+    ): Promise<
+        CombinedPostprocessingResult 
+        | CellsPostprocessingResult 
+        | TreeringPostprocessingResult 
+        | Error
+    >;
 }
 
 

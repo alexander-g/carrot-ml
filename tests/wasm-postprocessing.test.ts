@@ -101,6 +101,8 @@ Deno.test('postprocess_combined', async () => {
     //console.log(output1)
     asserts.assertNotInstanceOf(output1, Error)
     asserts.assert('ringmap_workshape_png' in output1)
+
+    asserts.assertGreater(output1.cell_info.length, 0)
 })
 
 
