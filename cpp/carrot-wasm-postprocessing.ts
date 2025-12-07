@@ -4,6 +4,7 @@ import type {
     TreeringPostprocessingResult,
     CellsPostprocessingResult,
     CombinedPostprocessingResult,
+    CellInfo,
     PairedPaths,
     PathPair,
     Path,
@@ -14,6 +15,9 @@ import type {
 import { 
     is_array_of_type,
     is_number_array,
+    is_object,
+    has_number_property,
+    has_property_of_type,
 } from "./dep.ts"
 
 
@@ -24,37 +28,6 @@ type pointer = number;
 
 
 type CARROT_Postprocessing_WASM = {
-    _postprocess_treeringmapfile_wasm: (
-        filesize:             number,
-        read_file_callback_p: fn_pointer,
-        read_file_handle:     number,
-        workshape_width:      number,
-        workshape_height:     number,
-        og_shape_width:       number,
-        og_shape_height:      number,
-        // outputs
-        treeringmap_workshape_png:       pointer,
-        treeringmap_workshape_png_size:  pointer,
-        ring_points_xy_json:             pointer,
-        ring_points_xy_json_size:        pointer,
-        returncode: pointer,
-    ) => number,
-
-    _postprocess_cellmapfile_wasm: (
-        filesize:             number,
-        read_file_callback_p: fn_pointer,
-        read_file_handle:     number,
-        workshape_width:      number,
-        workshape_height:     number,
-        og_shape_width:       number,
-        og_shape_height:      number,
-        // outputs
-        cellmap_workshape_png:          pointer,
-        cellmap_workshape_png_size:     pointer,
-        instancemap_workshape_png:      pointer,
-        instancemap_workshape_png_size: pointer,
-        returncode: pointer,
-    ) => number,
 
     _postprocess_combined_wasm: (
         cellmap_filesize:                      number,
@@ -78,6 +51,8 @@ type CARROT_Postprocessing_WASM = {
         ring_points_xy_json_size:        pointer,
         ringmap_workshape_png_pp:        pointer,
         ringmap_workshape_png_size_p:    pointer,
+        cell_info_json_size:             pointer,
+        cell_info_json:                  pointer,
 
         returncode: pointer,
     ) => number,
@@ -157,12 +132,15 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         const ring_points_xy_json_size_p:pointer       = this.#malloc(8);
         const ringmap_workshape_png_pp:pointer         = this.#malloc(8);
         const ringmap_workshape_png_size_p:pointer     = this.#malloc(8);
+        const cell_info_json_pp:pointer                = this.#malloc(8);
+        const cell_info_json_size_p:pointer            = this.#malloc(8);
 
         let cellmap_workshape_png_p:pointer|undefined     = undefined;
         let instancemap_workshape_png_p:pointer|undefined = undefined;
         let treeringmap_workshape_png_p:pointer|undefined = undefined;
         let ring_points_xy_json_p:pointer|undefined       = undefined;
         let ringmap_workshape_png_p:pointer|undefined     = undefined;
+        let cell_info_json_p:pointer|undefined            = undefined;
 
 
         try {
@@ -189,6 +167,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 ring_points_xy_json_size_p,
                 ringmap_workshape_png_pp,
                 ringmap_workshape_png_size_p,
+                cell_info_json_pp,
+                cell_info_json_size_p,
 
                 rc_ptr
             )
@@ -252,6 +232,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
 
             let ringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
+            let cell_info:CellInfo[]|null = null;
             if(cellmap && treeringmap) {
                 ringmap_workshape_png_p = 
                     this.wasm.HEAP32[ringmap_workshape_png_pp >> 2]!;
@@ -261,14 +242,26 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     ringmap_workshape_png_p, 
                     ringmap_workshape_png_p + ringmap_workshape_png_size
                 )
+
+                cell_info_json_p = this.wasm.HEAP32[cell_info_json_pp >> 2]!;
+                const cell_info_json_size_p_json_size:number = 
+                    Number(this.wasm.HEAP64[cell_info_json_size_p >> 3]);
+                const cell_info_json_u8:Uint8Array = this.wasm.HEAPU8.slice(
+                    cell_info_json_p, 
+                    cell_info_json_p + cell_info_json_size_p_json_size
+                )
+                const obj:unknown = 
+                    JSON.parse(new TextDecoder().decode(cell_info_json_u8));
+                cell_info = validate_cell_info_array(obj)
+                if(cell_info == null)
+                    return new Error('WASM-JS communication inconcistencies')
             }
-
-
 
             if(cellmap_workshape_png_u8 
             && instancemap_workshape_png_u8 
             && treeringmap_workshape_png_u8 
             && paired_paths 
+            && cell_info
             && ringmap_workshape_png_u8)
                 return {
                     cellmap_workshape_png: 
@@ -282,19 +275,26 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                     ringmap_workshape_png:
                         new File([ringmap_workshape_png_u8], 'ringmap.png'),
-                }
+                    cell_info: cell_info,
+
+                    _type: "combined",
+                };
             else if(cellmap_workshape_png_u8 && instancemap_workshape_png_u8)
                 return {
                     cellmap_workshape_png: 
                         new File([cellmap_workshape_png_u8], 'cellmap.png'),
                     instancemap_workshape_png: 
                         new File([instancemap_workshape_png_u8], 'instancemap.png'),
+                    
+                    _type: "cells"
                 }
             else if(treeringmap_workshape_png_u8 && paired_paths)
                 return {
                     treeringmap_workshape_png:
                         new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
                     ring_points_xy: paired_paths,
+
+                    _type: "treerings"
                 }
             else
                 return new Error('Unexpected error')
@@ -314,6 +314,9 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             this.wasm._free(ring_points_xy_json_size_p);
             this.wasm._free(ringmap_workshape_png_pp);
             this.wasm._free(ringmap_workshape_png_size_p);
+            this.wasm._free(cell_info_json_pp);
+            this.wasm._free(cell_info_json_size_p);
+
             if(cells_handle != 0)
                 delete this.#read_file_callback_table[cells_handle];
             if(rings_handle != 0)
@@ -329,6 +332,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 this.wasm._free_output(ringmap_workshape_png_pp);
             if(ring_points_xy_json_p != undefined) 
                 this.wasm._free_output(ring_points_xy_json_pp);
+            if(cell_info_json_p != undefined) 
+                this.wasm._free_output(cell_info_json_pp);
         }
     }
 
@@ -393,6 +398,33 @@ function validate_pathpair(x:unknown): PathPair|null {
 
 function validate_paired_paths(x:unknown):PairedPaths|null {
     if(is_array_of_type(x, validate_pathpair)){
+        return x;
+    }
+    else return null;
+}
+
+
+function validate_box(x:unknown): [number,number,number,number]|null {
+    if(is_number_array(x) && x.length == 4)
+            return x as [number,number,number,number];
+    else return  null;
+}
+
+function validate_cell_info_object(x:unknown): CellInfo|null {
+    if(is_object(x)
+    && has_number_property(x, "id")
+    && has_property_of_type(x, "box_xy", validate_box)
+    && has_number_property(x, "year_index")
+    && has_number_property(x, "area")
+    && has_number_property(x, "position_within")
+    ){
+        return x;
+    }
+    else return null;
+}
+
+function validate_cell_info_array(x:unknown): CellInfo[]|null {
+    if(is_array_of_type(x, validate_cell_info_object)){
         return x;
     }
     else return null;

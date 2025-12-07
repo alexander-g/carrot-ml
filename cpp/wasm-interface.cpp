@@ -55,6 +55,8 @@ int postprocess_combined_wasm(
     uint32_t*   ring_points_xy_json_size_p,
     uint8_t**   ringmap_workshape_png_pp,
     uint32_t*   ringmap_workshape_png_size_p,
+    uint8_t**   cell_info_json_pp,
+    uint32_t*   cell_info_json_size_p,
     // returncode because of wasm issues, required
     int* returncode
 ) {
@@ -158,7 +160,8 @@ int postprocess_combined_wasm(
         *treeringmap_workshape_png_size_p = treeringmap_png->size;
 
         // NOTE 2 self: must be non-const for std::move to work
-        std::string ring_points_json = paired_paths_to_json(output_rings.ring_points_xy);
+        std::string ring_points_json = 
+            paired_paths_to_json(output_rings.ring_points_xy);
 
         *ring_points_xy_json_pp = (uint8_t*)ring_points_json.c_str();
         *ring_points_xy_json_size_p = ring_points_json.size();
@@ -180,6 +183,18 @@ int postprocess_combined_wasm(
         const Buffer_p& ringmap_png = output_combined.ringmap_rgb_png;
         *ringmap_workshape_png_pp     = ringmap_png->data;
         *ringmap_workshape_png_size_p = ringmap_png->size;
+
+        // NOTE: must be non-const for std::move to work
+        std::string cell_info_json = cell_info_to_json(output_combined.cell_info);
+
+        *cell_info_json_pp = (uint8_t*)cell_info_json.c_str();
+        *cell_info_json_size_p = cell_info_json.size();
+
+        
+        wasm_output_storage.emplace(
+            (void*)cell_info_json_pp, 
+            [x = std::move(cell_info_json)]() mutable { /* no-op */ } 
+        );
         wasm_output_storage.emplace(
             (void*)ringmap_workshape_png_pp, 
             [x = std::move(ringmap_png)]() mutable { /* no-op */ } 
