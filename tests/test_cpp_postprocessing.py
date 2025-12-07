@@ -138,6 +138,23 @@ def test_postprocess_treeringmapfile3_large():
 
 
 
+# bug
+def test_postprocess_treeringmapfile4_very_long():
+    treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap4.png' )
+
+    workshape = (1237, 16164)
+    og_shape  = (1237, 16164)
+
+    out4 = postp.postprocess_treeringmapfile(treeringfile, workshape, og_shape)
+    print(len(out4['ring_points_xy']))
+    for p0,p1 in out4['ring_points_xy']:
+        print( p0[0].astype(int), p1[0].astype(int) )
+
+    assert len(out4['ring_points_xy']) > 60
+    
+
+
+
 
 def test_postprocess_cellmapfile():
     mask = np.zeros([1000,1000], dtype=bool)
