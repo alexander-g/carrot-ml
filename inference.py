@@ -11,7 +11,7 @@ from traininglib import datalib, modellib, args, inference
 
 
 def main(args: argparse.Namespace):
-    for inferenceitem in inference.base_inference(args):
+    for inferenceitem in inference.base_inference(args, px_per_mm=args.px_per_mm):
         save_output(inferenceitem, args.output)
 
 
@@ -27,6 +27,10 @@ def save_output(inferenceitem, destination:str) -> str:
             output = (output * 255).astype('uint8')
         PIL.Image.fromarray(output).save(outputpath)
         return outputpath
+    if 'classmap' in output:
+        segmentation_u8 = (output['classmap'] * 255).astype('uint8')
+        PIL.Image.fromarray(segmentation_u8).save(outputpath)
+        return outputpath
     if 'segmentation' in output:
         segmentation_u8 = (output['segmentation'] * 255).astype('uint8')
         PIL.Image.fromarray(segmentation_u8).save(outputpath)
@@ -35,9 +39,20 @@ def save_output(inferenceitem, destination:str) -> str:
         raise NotImplementedError(type(output))
 
 
+def get_parser() -> argparse.ArgumentParser:
+    parser = args.base_inference_argparser()
+    parser.add_argument(
+        '--px-per-mm', 
+        type = float, 
+        help = 'Image resolution',
+        required = True, 
+    )
+    return parser
+
+
 
 if __name__ == '__main__':
-    args = args.base_inference_argparser().parse_args()
+    args = get_parser().parse_args()
     main(args)
 
     print('Done')

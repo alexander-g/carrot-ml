@@ -25,7 +25,7 @@ def update(args:argparse.Namespace):
     clsname = m.__class__.__name__
 
     CARROT_cls:type[CC_Cells_CARROT|Treerings_CARROT]
-    inference:CC_CellsInference|TreeringsInference
+    inference:CC_CellsInference|TreeringsInference|MaskRCNN_CellsModule
     if clsname == 'CC_CellsTrainStep':
         module = CC_CellsModule()
         print(module.load_state_dict(m.module.state_dict()))
@@ -37,9 +37,12 @@ def update(args:argparse.Namespace):
         inference = TreeringsInference(module, patchsize=m.inputsize)
         CARROT_cls = Treerings_CARROT
     elif clsname == 'MaskRCNN_TrainStep':
-        module = MaskRCNN_CellsModule(inputsize=m.inputsize) # type: ignore
-        print(module.load_state_dict(m.module.state_dict()))
-        inference = module
+        module_mrcnn = MaskRCNN_CellsModule(
+            inputsize        = m.inputsize, 
+            target_px_per_mm = m.module.px_per_mm,
+        )
+        print(module_mrcnn.load_state_dict(m.module.state_dict()))
+        inference = module_mrcnn
         CARROT_cls = MaskRCNN_Cells_CARROT
     else:
         assert 0, f'Unknown class: {clsname}'

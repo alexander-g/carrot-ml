@@ -56,7 +56,13 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
         og_shape = page.shape
-    H,W,C = og_shape
+    if len(og_shape) == 3:
+        H,W,C = og_shape
+    elif len(og_shape) == 2:
+        H,W = og_shape
+    else:
+        # ???? should not happen
+        raise RuntimeError(f'Unexpected image shape: {og_shape}')
     C = 3 
     newshape = [ C, int(H * scale), int(W * scale) ]
     result = torch.zeros(newshape, dtype=torch.uint8)
@@ -67,6 +73,9 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
         # cannot memmap if compressed
         with tifffile.TiffFile(path) as tif:
             imdata = tif.pages[0].asarray()  # type: ignore
+
+    if len(imdata.shape) == 2:
+        imdata = imdata[..., None] # type: ignore
 
     for i in range(0, H, patchsize):
         for j in range(0, W, patchsize):

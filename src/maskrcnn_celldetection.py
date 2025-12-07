@@ -46,7 +46,7 @@ HARDCODED_DEFAULT_PATCHSIZE = 800
 
 # basic mask rcnn
 class MaskRCNN_CellsModule(torch.nn.Module):
-    def __init__(self, inputsize:int, **kw):
+    def __init__(self, inputsize:int, target_px_per_mm:tp.Optional[float], **kw):
         super().__init__()
         self.basemodule = torchvision.models.detection.maskrcnn_resnet50_fpn(
             pretrained = True, 
@@ -58,7 +58,7 @@ class MaskRCNN_CellsModule(torch.nn.Module):
         self.basemodule.roi_heads.score_thresh = 0.5
 
         self.inputsize = inputsize
-        self.px_per_mm = HARDCODED_GOOD_RESOLUTION
+        self.px_per_mm = target_px_per_mm or HARDCODED_GOOD_RESOLUTION
 
     def forward(self, *x):
         outputs = self.basemodule(*x)
@@ -269,7 +269,7 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
         
         # image already scaled down, px_per_mm is now same as module's
         px_per_mm = self.module.px_per_mm
-        x, grid, n, _ = self.prepare(x, px_per_mm)
+        x, grid, n, _ = self.prepare_full_image(x, px_per_mm)
         instancemap_patches = []
         for i in range(0, n, batchsize):
             instancemaps = self.process_batch(x, grid, i, n, batchsize)
@@ -295,7 +295,7 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
         return classmap
 
     
-    def prepare(self, x:torch.Tensor, px_per_mm:float):
+    def prepare_full_image(self, x:torch.Tensor, px_per_mm:float):
         assert x.ndim == 3 and x.shape[-1] == 3 and x.dtype==torch.uint8, \
             'Input must be a single RGB uint8 image in HWC format'
         
@@ -309,8 +309,8 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
         device = self._device_indicator.device
         x = x.to(device)
 
-        # to f32 CHW
-        x = x.permute(2,0,1) / 255
+        # to CHW, not yet to f32 to save memory
+        x = x.permute(2,0,1) #/ 255
         x = datalib.resize_tensor2(x, [h,w], 'bilinear' )
 
         shape = torch.tensor([h,w])
@@ -318,6 +318,11 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
         n     = grid.reshape(-1,4).shape[0]
         
         return x, grid, n, (H,W)
+    
+    def prepare_batch(self, x:torch.Tensor) -> torch.Tensor:
+        if x.dtype == torch.uint8:
+            x = x / 255
+        return x
     
     def process_batch(
         self, 
@@ -334,7 +339,9 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
             x_patches.append(x_patch)
 
         x_batch = torch.stack(x_patches)
-        output:torch.Tensor = self.module(x_batch)
+        x_batch = self.prepare_batch(x_batch)
+        with torch.no_grad():
+            output:torch.Tensor = self.module(x_batch)
         instancemaps = [item['instances'] for item in output]
         return instancemaps
 
@@ -425,8 +432,8 @@ def stitch_and_relabel_instancemaps_from_grid(
             gridcell1 = grid[i,j]
             overlap   = compute_overlap(gridcell0, gridcell1) # type: ignore
             x0,y0,w,h = overlap
-            overlap0  = (x0 - gridcell0[1], y0 - gridcell0[0], w, h)
-            overlap1  = (x0 - gridcell1[1], y0 - gridcell1[0], w, h)
+            overlap0  = (int(x0 - gridcell0[1]), int(y0 - gridcell0[0]), w, h)
+            overlap1  = (int(x0 - gridcell1[1]), int(y0 - gridcell1[0]), w, h)
             instancemap0 = instancemaps[i*W + j-1]
             instancemap1 = instancemaps[i*W + j]
             instancemap1 = \
@@ -446,8 +453,8 @@ def stitch_and_relabel_instancemaps_from_grid(
             gridcell1 = gridcell_row_i
             overlap   = compute_overlap(gridcell0, gridcell1) # type: ignore
             x0,y0,w,h = overlap
-            overlap0  = (x0 - gridcell0[1], y0 - gridcell0[0], w, h)
-            overlap1  = (x0 - gridcell1[1], y0 - gridcell1[0], w, h)
+            overlap0  = (int(x0 - gridcell0[1]), int(y0 - gridcell0[0]), w, h)
+            overlap1  = (int(x0 - gridcell1[1]), int(y0 - gridcell1[0]), w, h)
             instancemap_row_i = relabel_instancemaps(
                 instancemap_rows[i-1],
                 instancemap_row_i,
@@ -501,8 +508,9 @@ def start_training_from_carrot(
     finetunemodule: tp.Optional[MaskRCNN_CellsModule] = None,
 ) -> MaskRCNN_Cells_CARROT:
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
+    target_px_per_mm = HARDCODED_GOOD_RESOLUTION
 
-    module = MaskRCNN_CellsModule(patchsize)
+    module = MaskRCNN_CellsModule(patchsize, target_px_per_mm)
     if finetunemodule is not None:
         print( module.load_state_dict(finetunemodule.state_dict()) )
     

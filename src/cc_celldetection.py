@@ -226,11 +226,12 @@ class CC_CellsDataset(PatchedCachingDataset):
         self, 
         filepairs: tp.List[tp.Tuple[str,str]], 
         patchsize: int, 
-        px_per_mm: float, 
+        image_px_per_mm:  float, 
+        target_px_per_mm: float,
         *a, 
         **kw
     ):
-        scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
+        scale = target_px_per_mm / image_px_per_mm
         super().__init__(filepairs, patchsize, scale, *a, **kw)
         self.items = self.filepairs
     

@@ -11,13 +11,17 @@ from src.maskrcnn_celldetection import (
 
 
 def main(args:args.Namespace):
-    module  = MaskRCNN_CellsModule(inputsize=args.inputsize)
+    module  = MaskRCNN_CellsModule(
+        inputsize        = args.inputsize, 
+        target_px_per_mm = args.target_px_per_mm
+    )
     step    = MaskRCNN_TrainStep(module, inputsize=args.inputsize)
     # NOTE: *2 because of cropping augmentations
     dataset = InstanceDataset.from_splitfile(
         args.trainsplit, 
         patchsize = args.inputsize*2, 
-        px_per_mm = args.px_per_mm
+        image_px_per_mm  = args.px_per_mm,
+        target_px_per_mm = module.px_per_mm,
     )
 
     # NOTE: threaded because getting errors otherwise
@@ -41,8 +45,14 @@ def get_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--px-per-mm', 
         type = float, 
-        help = 'Image resolution',
+        help = 'Resolution of training images',
         required = True, 
+    )
+    parser.add_argument(
+        '--target-px-per-mm', 
+        type = float, 
+        help = 'Internal processing resolution',
+        required = False, 
     )
     return parser
 
