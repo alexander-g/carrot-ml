@@ -238,7 +238,6 @@ std::optional<double> estimate_position_within_treering(
     if(treering.first.empty() || treering.second.empty() || cellpoints.empty())
         return std::nullopt;
 
-    return std::nullopt;
     const Point centroid = *average_points(cellpoints);
 
     const double closest0 = *closest_distance(treering.first, centroid);

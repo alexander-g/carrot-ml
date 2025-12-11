@@ -230,6 +230,9 @@ def test_postprocessing_combined():
     year_indices = [ c['year_index'] for c in output['cell_info'] ]
     # 3 full rings + incomplete ones counted as -1
     assert len(np.unique(year_indices)) == 4
+    for c in output['cell_info']:
+        if c['year_index'] >= 0:
+            assert 0 <= c['position_within'] <= 1
 
     instancemap1 = np.array(
         PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) )
