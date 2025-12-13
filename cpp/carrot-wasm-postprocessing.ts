@@ -47,6 +47,8 @@ type CARROT_Postprocessing_WASM = {
         instancemap_workshape_png_size:  pointer,
         treeringmap_workshape_png:       pointer,
         treeringmap_workshape_png_size:  pointer,
+        treeringmap_og_shape_png:        pointer,
+        treeringmap_og_shape_png_size:   pointer,
         ring_points_xy_json:             pointer,
         ring_points_xy_json_size:        pointer,
         ringmap_workshape_png_pp:        pointer,
@@ -128,6 +130,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         const instancemap_workshape_png_size_p:pointer = this.#malloc(8);
         const treeringmap_workshape_png_pp:pointer     = this.#malloc(8);
         const treeringmap_workshape_png_size_p:pointer = this.#malloc(8);
+        const treeringmap_og_shape_png_pp:pointer      = this.#malloc(8);
+        const treeringmap_og_shape_png_size_p:pointer  = this.#malloc(8);
         const ring_points_xy_json_pp:pointer           = this.#malloc(8);
         const ring_points_xy_json_size_p:pointer       = this.#malloc(8);
         const ringmap_workshape_png_pp:pointer         = this.#malloc(8);
@@ -138,6 +142,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         let cellmap_workshape_png_p:pointer|undefined     = undefined;
         let instancemap_workshape_png_p:pointer|undefined = undefined;
         let treeringmap_workshape_png_p:pointer|undefined = undefined;
+        let treeringmap_og_shape_png_p:pointer|undefined  = undefined;
         let ring_points_xy_json_p:pointer|undefined       = undefined;
         let ringmap_workshape_png_p:pointer|undefined     = undefined;
         let cell_info_json_p:pointer|undefined            = undefined;
@@ -163,6 +168,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 instancemap_workshape_png_size_p,
                 treeringmap_workshape_png_pp,
                 treeringmap_workshape_png_size_p,
+                treeringmap_og_shape_png_pp,
+                treeringmap_og_shape_png_size_p,
                 ring_points_xy_json_pp,
                 ring_points_xy_json_size_p,
                 ringmap_workshape_png_pp,
@@ -205,6 +212,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
 
             let treeringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null
+            let treeringmap_og_shape_png_u8:Uint8Array<ArrayBuffer>|null = null
             let paired_paths:PairedPaths|null = null;
             if(treeringmap) {
                 treeringmap_workshape_png_p = 
@@ -215,6 +223,16 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     treeringmap_workshape_png_p, 
                     treeringmap_workshape_png_p + treeringmap_workshape_png_size
                 )
+
+                treeringmap_og_shape_png_p = 
+                    this.wasm.HEAP32[treeringmap_og_shape_png_pp >> 2]!;
+                const treeringmap_og_shape_png_size:number = 
+                    Number(this.wasm.HEAP64[treeringmap_og_shape_png_size_p >> 3]);
+                treeringmap_og_shape_png_u8 = this.wasm.HEAPU8.slice(
+                    treeringmap_og_shape_png_p, 
+                    treeringmap_og_shape_png_p + treeringmap_og_shape_png_size
+                )
+
 
                 ring_points_xy_json_p = this.wasm.HEAP32[ring_points_xy_json_pp >> 2]!;
                 const ring_points_xy_json_size:number = 
@@ -288,10 +306,14 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     
                     _type: "cells"
                 }
-            else if(treeringmap_workshape_png_u8 && paired_paths)
+            else if(treeringmap_workshape_png_u8 
+                 && treeringmap_og_shape_png_u8 
+                 && paired_paths)
                 return {
                     treeringmap_workshape_png:
                         new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
+                    treeringmap_og_shape_png:
+                        new File([treeringmap_og_shape_png_u8], 'treeringmap.png'),
                     ring_points_xy: paired_paths,
 
                     _type: "treerings"
@@ -310,6 +332,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             this.wasm._free(instancemap_workshape_png_size_p);
             this.wasm._free(treeringmap_workshape_png_pp);
             this.wasm._free(treeringmap_workshape_png_size_p);
+            this.wasm._free(treeringmap_og_shape_png_pp);
+            this.wasm._free(treeringmap_og_shape_png_size_p);
             this.wasm._free(ring_points_xy_json_pp);
             this.wasm._free(ring_points_xy_json_size_p);
             this.wasm._free(ringmap_workshape_png_pp);
@@ -328,6 +352,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 this.wasm._free_output(instancemap_workshape_png_pp);
             if(treeringmap_workshape_png_p != undefined) 
                 this.wasm._free_output(treeringmap_workshape_png_pp);
+            if(treeringmap_og_shape_png_p != undefined)
+                this.wasm._free_output(treeringmap_og_shape_png_pp);
             if(ringmap_workshape_png_p != undefined) 
                 this.wasm._free_output(ringmap_workshape_png_pp);
             if(ring_points_xy_json_p != undefined) 

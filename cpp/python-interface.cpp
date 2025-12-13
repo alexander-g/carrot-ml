@@ -93,7 +93,8 @@ py::dict postprocess_treeringmapfile_py(
     py::dict d;
     d["treeringmap_workshape_png"] = 
         buffer_to_bytes(*output_x->treeringmap_workshape_png);
-    //d["treeringmap_ogshape_png"]   = "???";
+    d["treeringmap_ogshape_png"] = 
+        buffer_to_bytes(*output_x->treeringmap_og_shape_png);
     d["ring_points_xy"] = vec_paired_paths_to_numpy(output_x->ring_points_xy);
     return d;
 }

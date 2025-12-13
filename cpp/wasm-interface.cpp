@@ -51,6 +51,8 @@ int postprocess_combined_wasm(
     uint32_t*   instancemap_workshape_png_size_p,
     uint8_t**   treeringmap_workshape_png_pp,
     uint32_t*   treeringmap_workshape_png_size_p,
+    uint8_t**   treeringmap_og_shape_png_pp,
+    uint32_t*   treeringmap_og_shape_png_size_p,
     uint8_t**   ring_points_xy_json_pp,
     uint32_t*   ring_points_xy_json_size_p,
     uint8_t**   ringmap_workshape_png_pp,
@@ -155,9 +157,16 @@ int postprocess_combined_wasm(
         const TreeringsPostprocessingResult& output_rings = *expect_output_rings;
 
         // shared pointer
-        const Buffer_p& treeringmap_png = output_rings.treeringmap_workshape_png;
-        *treeringmap_workshape_png_pp     = treeringmap_png->data;
-        *treeringmap_workshape_png_size_p = treeringmap_png->size;
+        const Buffer_p& treeringmap_workshape_png = 
+            output_rings.treeringmap_workshape_png;
+        *treeringmap_workshape_png_pp     = treeringmap_workshape_png->data;
+        *treeringmap_workshape_png_size_p = treeringmap_workshape_png->size;
+
+        // shared pointer
+        const Buffer_p& treeringmap_og_shape_png = 
+            output_rings.treeringmap_og_shape_png;
+        *treeringmap_og_shape_png_pp     = treeringmap_og_shape_png->data;
+        *treeringmap_og_shape_png_size_p = treeringmap_og_shape_png->size;
 
         // NOTE 2 self: must be non-const for std::move to work
         std::string ring_points_json = 
@@ -171,7 +180,11 @@ int postprocess_combined_wasm(
         );
         wasm_output_storage.emplace(
             (void*)treeringmap_workshape_png_pp, 
-            [x = std::move(treeringmap_png)]() mutable { /* no-op */ } 
+            [x = std::move(treeringmap_workshape_png)]() mutable { /* no-op */ } 
+        );
+        wasm_output_storage.emplace(
+            (void*)treeringmap_og_shape_png_pp, 
+            [x = std::move(treeringmap_og_shape_png)]() mutable { /* no-op */ } 
         );
     }
 

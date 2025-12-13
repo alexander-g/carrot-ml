@@ -99,7 +99,7 @@ def test_postprocess_treeringmapfile():
     ])
 
     assert PIL.Image.open( io.BytesIO(out1['treeringmap_workshape_png']) ).size == workshape
-    #assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
+    assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
 
 
 def test_postprocess_treeringmapfile2():

@@ -9,6 +9,7 @@ export type ImageSize   = {width: number, height:number};
 
 export type TreeringPostprocessingResult = {
     treeringmap_workshape_png: File;
+    treeringmap_og_shape_png:  File;
 
     ring_points_xy: PairedPaths;
 

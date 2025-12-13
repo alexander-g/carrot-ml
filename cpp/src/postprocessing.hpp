@@ -34,7 +34,7 @@ Paths segmentation_to_paths(
 
 struct TreeringsPostprocessingResult {
     Buffer_p treeringmap_workshape_png;
-    // EigenBinaryMap treeringmap_ogshape;
+    Buffer_p treeringmap_og_shape_png;
 
     // scaled to og_shape
     PairedPaths ring_points_xy;
