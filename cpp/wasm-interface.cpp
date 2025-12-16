@@ -1,9 +1,11 @@
 #include <cstdint>
 #include <unordered_map>
 
+#include "./src/image-utils.hpp"
 #include "./src/postprocessing.hpp"
 #include "./src/postprocessing_cells.hpp"
 #include "./src/wasm-utils.hpp"
+#include "./wasm-big-image/src/png-io.hpp"
 
 
 
@@ -213,6 +215,62 @@ int postprocess_combined_wasm(
             [x = std::move(ringmap_png)]() mutable { /* no-op */ } 
         );
     }
+
+    *returncode = OK;
+    return *returncode;
+}
+
+
+int resize_mask(
+    // file read callbacks
+    uint32_t    filesize,
+    const void* read_file_callback_p,
+    const void* read_file_callback_handle,
+    // target size
+    uint32_t    width,
+    uint32_t    height,
+    // abort input signal, can be null
+    const bool* abort_signal,
+    // output
+    uint8_t**   png_buffer_pp,
+    uint32_t*   png_buffer_size_p,
+    // returncode because of wasm issues, required
+    int* returncode
+) {
+    *returncode = UNEXPECTED;
+
+    const auto expect_mask = load_and_resize_binary_png2(
+        filesize, 
+        read_file_callback_p, 
+        read_file_callback_handle,
+        width,
+        height
+    );
+    if(!expect_mask){
+        *returncode = expect_mask.error();
+        return *returncode;
+    }
+    const EigenBinaryMap& mask = expect_mask.value();
+
+    const std::expected<Buffer_p, int> expect_resized_png = 
+        resize_image_and_encode_as_png(
+            binary_to_rgba(mask),
+            {.width=width, .height=height},
+            abort_signal
+        );
+    if(!expect_resized_png){
+        *returncode = expect_resized_png.error();
+        return *returncode;
+    }
+    const Buffer_p resized_png = expect_resized_png.value();
+
+    *png_buffer_pp     = resized_png->data;
+    *png_buffer_size_p = resized_png->size;
+    
+    wasm_output_storage.emplace(
+        (void*)png_buffer_pp, 
+        [x = std::move(resized_png)]() mutable { /* no-op */ } 
+    );
 
     *returncode = OK;
     return *returncode;

@@ -4,6 +4,7 @@ import type {
     TreeringPostprocessingResult,
     CellsPostprocessingResult,
     CombinedPostprocessingResult,
+    EncodingInProgess,
     CellInfo,
     PairedPaths,
     PathPair,
@@ -57,6 +58,22 @@ type CARROT_Postprocessing_WASM = {
         cell_info_json:                  pointer,
 
         returncode: pointer,
+    ) => number,
+
+    _resize_mask: (
+        filesize:                  number,
+        read_file_callback_p:      pointer,
+        read_file_callback_handle: pointer,
+        // target size
+        width:  number,
+        height: number,
+        // abort input signal, can be null
+        abort_signal:  pointer,
+        // output
+        png_buffer_pp:     pointer,
+        png_buffer_size_p: pointer,
+        // returncode because of wasm issues, required
+        returncode: pointer
     ) => number,
 
     _free_output: (p:pointer) => void,
@@ -297,6 +314,109 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             this.#free_dynamic_buffer_outputs();
         }
     }
+
+
+
+
+    #abort_handles:Set<number> = new Set()
+
+    resize_mask(mask:File, size:ImageSize): EncodingInProgess {
+
+        let abort_handle:       pointer = 0;
+        let rc_ptr:             pointer;
+        let resized_png_pp:     pointer;
+        let resized_png_size_p: pointer;
+        // deno-lint-ignore no-unused-vars
+        let clean_up_in_finally:boolean = true;
+
+        const promise:Promise<File|Error> = new Promise( (resolve):void => {
+        
+        try {
+            const read_cb_handle:number = this.#handle_counter++;
+            this.#read_file_callback_table[read_cb_handle] = mask;
+
+            rc_ptr             = this.#malloc(4, /*fill=*/255)
+            resized_png_pp     = this.#malloc(8);
+            resized_png_size_p = this.#malloc(8);
+            abort_handle       = this.#malloc(8);
+
+            this.#abort_handles.add(abort_handle)
+
+
+            const rc:number = this.wasm._resize_mask(
+                mask.size, 
+                this.#read_file_callback_ptr, 
+                read_cb_handle, 
+
+                size.width, 
+                size.height,
+
+                abort_handle,
+
+                resized_png_pp,
+                resized_png_size_p,
+
+                rc_ptr
+            )
+            if(rc == 0)
+                // so far no errors, continue, do not clean up
+                clean_up_in_finally = false;
+            
+        } catch (e) {
+            console.error('Unexpected error:', e)
+            resolve(e as Error);
+        } finally {
+            if(clean_up_in_finally){
+                this.#free_allocated_buffers();
+                if(abort_handle != 0)
+                    this.#abort_handles.delete(abort_handle)
+            }
+        }
+
+        // deno-lint-ignore no-this-alias
+        const _this:this = this;
+        function poll_until_ready():void {
+            if(_this.wasm.Asyncify.currData != null){
+                setTimeout(poll_until_ready, 1);
+                return;
+            }
+
+            const rc:number = _this.wasm.HEAP32[rc_ptr >> 2]!;
+            if(rc != 0) {
+                resolve( new Error(`WASM error code = ${rc}`) )
+                return;
+            }
+
+            const resized_png_u8:Uint8Array<ArrayBuffer> 
+                = _this.#read_dynamic_output_buffer(
+                    resized_png_pp,
+                    resized_png_size_p
+                )
+            
+            _this.#free_allocated_buffers();
+            _this.#free_dynamic_buffer_outputs();
+            if(abort_handle != 0)
+                _this.#abort_handles.delete(abort_handle)
+            resolve(new File([resized_png_u8], mask.name));
+        }
+        // NOTE: the wasm function above returns before the execution is 
+        // finished because of async issues, so currently polling until done
+        // also: await not allowed inside of a Promise function
+        poll_until_ready();
+
+        } )
+
+        return {file:promise, abort_handle}
+    }
+
+    abort_resize(abort_handle: number): void {
+        if(this.#abort_handles.has(abort_handle)) {
+            this.wasm.HEAPU8[abort_handle] = 1;
+            this.#abort_handles.delete(abort_handle)
+        } else
+            console.error(`Abort requested for unknown handle: ${abort_handle}`)
+    }
+
 
 
 

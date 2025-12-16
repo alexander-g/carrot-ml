@@ -125,7 +125,7 @@ add_custom_target(carrot_postprocessing_wasm-js ALL
         -sSINGLE_FILE=1 
         -sEXPORT_NAME="carrot_postprocessing_wasm" 
         -sEXPORTED_RUNTIME_METHODS=addFunction,Asyncify
-        -sEXPORTED_FUNCTIONS=_postprocess_combined_wasm,_free_output,_malloc,_free
+        -sEXPORTED_FUNCTIONS=_postprocess_combined_wasm,_resize_mask,_free_output,_malloc,_free
         -sENVIRONMENT=web 
         -sALLOW_TABLE_GROWTH 
         -sALLOW_MEMORY_GROWTH=1

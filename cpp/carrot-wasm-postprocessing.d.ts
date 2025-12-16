@@ -49,7 +49,10 @@ export type CombinedPostprocessingResult = {
     _type: "combined";
 }
 
-
+export type EncodingInProgess = {
+    file:         Promise<File|Error>;
+    abort_handle: number;
+};
 
 export declare class CARROT_Postprocessing {
     private constructor();
@@ -66,6 +69,13 @@ export declare class CARROT_Postprocessing {
         | TreeringPostprocessingResult 
         | Error
     >;
+
+    /** Resize a binary png file to a specified size. Operation can be aborted
+     *  via `abort_resize()`. */
+    resize_mask(mask:File, size:ImageSize): EncodingInProgess;
+
+    /** Abort a previously started resizing operation. */
+    abort_resize(abort_handle:number): void;
 }
 
 
