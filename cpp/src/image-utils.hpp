@@ -30,3 +30,9 @@ template<typename T> uint8_t* to_uint8_p(T* p) {
     return (uint8_t*) p;
 }
 
+
+
+/** Convert a boolean mask to HxWx4 RGBA data. */
+Eigen::Tensor<uint8_t, 3, Eigen::RowMajor> 
+binary_to_rgba(const EigenBinaryMap& mask);
+

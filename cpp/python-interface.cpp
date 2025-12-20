@@ -80,21 +80,23 @@ py::dict postprocess_treeringmapfile_py(
         throw std::runtime_error("Could not open file");
     const FileHandle* fhandle = fhandle_o.value().get();
 
-    const auto output_x = postprocess_treeringmapfile(
+    const auto expect_output = postprocess_treeringmapfile(
         fhandle->size, 
         (const void*) &fhandle->read_callback, 
         (void*) fhandle, 
         workshape,
         og_shape
     );
-    if(!output_x)
+    if(!expect_output)
         throw std::runtime_error("Postprocessing failed");
+    const TreeringsPostprocessingResult& output = expect_output.value();
 
     py::dict d;
     d["treeringmap_workshape_png"] = 
-        buffer_to_bytes(*output_x->treeringmap_workshape_png);
-    //d["treeringmap_ogshape_png"]   = "???";
-    d["ring_points_xy"] = vec_paired_paths_to_numpy(output_x->ring_points_xy);
+        buffer_to_bytes(*output.treeringmap_workshape_png);
+    d["treeringmap_ogshape_png"] = 
+        buffer_to_bytes(*output.treeringmap_og_shape_png.value());
+    d["ring_points_xy"] = vec_paired_paths_to_numpy(output.ring_points_xy);
     return d;
 }
 

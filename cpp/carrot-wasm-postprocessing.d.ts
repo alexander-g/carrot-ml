@@ -9,6 +9,7 @@ export type ImageSize   = {width: number, height:number};
 
 export type TreeringPostprocessingResult = {
     treeringmap_workshape_png: File;
+    treeringmap_og_shape_png:  File|null;
 
     ring_points_xy: PairedPaths;
 
@@ -48,6 +49,11 @@ export type CombinedPostprocessingResult = {
     _type: "combined";
 }
 
+// any of the above
+export type PostprocessingResult = 
+    CombinedPostprocessingResult 
+    | TreeringPostprocessingResult 
+    | CellsPostprocessingResult;
 
 
 export declare class CARROT_Postprocessing {
@@ -59,12 +65,14 @@ export declare class CARROT_Postprocessing {
         treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<
-        CombinedPostprocessingResult 
-        | CellsPostprocessingResult 
-        | TreeringPostprocessingResult 
-        | Error
-    >;
+    ): Promise<PostprocessingResult|Error>;
+
+    /** Resize a binary png file to a specified size. */
+    resize_mask(
+        mask:      File, 
+        work_size: ImageSize, 
+        og_size:   ImageSize
+    ): Promise<File|Error>;
 }
 
 

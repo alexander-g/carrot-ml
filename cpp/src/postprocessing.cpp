@@ -913,7 +913,9 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     const void* read_file_handle,
     // shape: height first, width second
     const ImageShape& workshape,
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    // flag to skip resizing mask, takes too long in the browser
+    bool do_not_resize_to_og_shape
 ) {
     // if not png: error?
 
@@ -945,13 +947,10 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
             )
         );
     
-    // ring_points = [
-    //     associate_pathpoints(ring_paths_yx[r0-1], ring_paths_yx[r1-1]) 
-    //         for r0,r1 in ring_labels
-    // ]
-    // ring_areas = [treering_area(*rp) for rp in ring_points]
 
-    const std::expected<Buffer_p, int> treeringmap_workshape_png_x = 
+    // TODO: ring_areas = [treering_area(*rp) for rp in ring_points]
+
+    const std::expected<Buffer_p, int> expect_treeringmap_workshape_png = 
         png_compress_image(
             to_uint8_p(mask.data()), 
             /*width=*/    mask.dimension(1),
@@ -959,14 +958,29 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
             /*channels=*/ 1
         );
     
-    if(!treeringmap_workshape_png_x)
+    if(!expect_treeringmap_workshape_png)
         return std::nullopt;
+    const Buffer_p treeringmap_workshape_png = *expect_treeringmap_workshape_png;
 
-    // return {data_encoded_workshape, data_encoded_og_shape, ring_points, ring_labels, ring_areas};
+    std::optional<Buffer_p> treeringmap_og_shape_png = std::nullopt;
+    if(workshape == og_shape)
+        treeringmap_og_shape_png = treeringmap_workshape_png;
+    else if(!do_not_resize_to_og_shape) {
+    //else if(true) {
+        const std::expected<Buffer_p, int> expect_treeringmap_og_shape_png = 
+            resize_image_and_encode_as_png(
+                binary_to_rgba(mask),
+                {.width=(uint32_t)og_shape.second, .height=(uint32_t)og_shape.first}
+            );
+        if(!expect_treeringmap_og_shape_png)
+            return std::nullopt;
+        treeringmap_og_shape_png = expect_treeringmap_og_shape_png.value();
+    } //else dont resize here, takes too long
 
     return TreeringsPostprocessingResult{
-        /*treeringmap_workshape_png = */ treeringmap_workshape_png_x.value(),
-        /*ring_points_xy = */ paired_paths
+        /*treeringmap_workshape_png = */ treeringmap_workshape_png,
+        /*treeringmap_og_shape_png  = */ treeringmap_og_shape_png,
+        /*ring_points_xy            = */ paired_paths
     };
 }
 

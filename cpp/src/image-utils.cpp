@@ -19,6 +19,28 @@ rgba_to_binary(const Eigen::Tensor<uint8_t, 3, Eigen::RowMajor>& rgba) {
     return mask;
 }
 
+
+/** Convert a boolean mask to HxWx4 RGBA data. */
+Eigen::Tensor<uint8_t, 3, Eigen::RowMajor>
+binary_to_rgba(const EigenBinaryMap& mask) {
+    const Eigen::Index H = mask.dimension(0);
+    const Eigen::Index W = mask.dimension(1);
+    Eigen::Tensor<uint8_t, 3, Eigen::RowMajor> rgba(H, W, 4);
+
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            const bool value = mask(y, x);
+            rgba(y, x, 0) = value * 255;
+            rgba(y, x, 1) = value * 255;
+            rgba(y, x, 2) = value * 255;
+            rgba(y, x, 3) = 255;
+        }
+    return rgba;
+}
+
+
+
+
 std::expected<EigenBinaryMap, int> load_and_resize_binary_png(
     size_t      filesize,
     const void* read_file_callback_p,
