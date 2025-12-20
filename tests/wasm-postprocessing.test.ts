@@ -103,21 +103,15 @@ Deno.test('postprocess_combined', async () => {
 
 
 
-Deno.test('resize_mask+abort', async () => {
+Deno.test('resize_mask', async () => {
     const module = await initialize();
     
     const filepath1 = import.meta.resolve('./assets/treeringsmap1.png').replace('file://','')
     const treeringmapfile1 = new File([Deno.readFileSync(filepath1)], 'treerrings.png')
 
 
-    const encoding_in_progress = module.resize_mask(treeringmapfile1, {width:10001, height:10002})
-    const encoded = await encoding_in_progress.file
+    const worksize = {width:400, height:400}
+    const targetsize = {width:10001, height:10002}
+    const encoded = await module.resize_mask(treeringmapfile1, worksize, targetsize)
     asserts.assertInstanceOf(encoded, File)
-
-
-    const encoding_in_progress2 = module.resize_mask(treeringmapfile1, {width:10001, height:10002})
-    module.abort_resize(encoding_in_progress2.abort_handle)
-    const encoded2 = await encoding_in_progress2.file
-    asserts.assertInstanceOf(encoded2, Error)
-
 })

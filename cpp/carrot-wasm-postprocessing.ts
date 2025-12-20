@@ -1,10 +1,7 @@
 import type {
     initialize as Iinitialize,
     CARROT_Postprocessing as ICARROT_Postprocessing,
-    TreeringPostprocessingResult,
-    CellsPostprocessingResult,
-    CombinedPostprocessingResult,
-    EncodingInProgess,
+    PostprocessingResult,
     CellInfo,
     PairedPaths,
     PathPair,
@@ -64,11 +61,11 @@ type CARROT_Postprocessing_WASM = {
         filesize:                  number,
         read_file_callback_p:      pointer,
         read_file_callback_handle: pointer,
-        // target size
-        width:  number,
-        height: number,
-        // abort input signal, can be null
-        abort_signal:  pointer,
+        // workshape and original/target shapes
+        workshape_width:  number,
+        workshape_height: number,
+        og_shape_width:   number,
+        og_shape_height:  number,
         // output
         png_buffer_pp:     pointer,
         png_buffer_size_p: pointer,
@@ -125,7 +122,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
-    ): Promise<CombinedPostprocessingResult | CellsPostprocessingResult | TreeringPostprocessingResult | Error> {
+    ): Promise<PostprocessingResult|Error> {
 
         let cells_handle:number = 0;
         let rings_handle:number = 0;
@@ -223,11 +220,13 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     treeringmap_og_shape_png_size_p
                 )
 
-                const ring_points_xy_json_u8:Uint8Array = 
+                const ring_points_xy_json_u8:Uint8Array|null = 
                     this.#read_dynamic_output_buffer(
                         ring_points_xy_json_pp,
                         ring_points_xy_json_size_p
                     )
+                if(ring_points_xy_json_u8 == null)
+                    return new Error('WASM error: did not return ring points')
                 const obj:unknown = 
                     JSON.parse(new TextDecoder().decode(ring_points_xy_json_u8));
                 paired_paths = validate_paired_paths(obj)
@@ -243,10 +242,13 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     ringmap_workshape_png_pp,
                     ringmap_workshape_png_size_p
                 )
-                const cell_info_json_u8:Uint8Array = this.#read_dynamic_output_buffer(
-                    cell_info_json_pp,
-                    cell_info_json_size_p
-                )
+                const cell_info_json_u8:Uint8Array|null = 
+                    this.#read_dynamic_output_buffer(
+                        cell_info_json_pp,
+                        cell_info_json_size_p
+                    )
+                if(cell_info_json_u8 == null)
+                    return new Error('WASM error: did not return cell info')
                 const obj:unknown = 
                     JSON.parse(new TextDecoder().decode(cell_info_json_u8));
                 cell_info = validate_cell_info_array(obj)
@@ -285,18 +287,23 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     
                     _type: "cells"
                 }
-            else if(treeringmap_workshape_png_u8 
-                 && treeringmap_og_shape_png_u8 
-                 && paired_paths)
+            else if(treeringmap_workshape_png_u8 && paired_paths){
+                const treeringmap_og_shape_png:File|null = 
+                    (treeringmap_og_shape_png_u8 != null)
+                    ? new File([treeringmap_og_shape_png_u8], 'treeringmap.png')
+                    : null;
+
                 return {
                     treeringmap_workshape_png:
                         new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
-                    treeringmap_og_shape_png:
-                        new File([treeringmap_og_shape_png_u8], 'treeringmap.png'),
-                    ring_points_xy: paired_paths,
+                    treeringmap_og_shape_png: 
+                        treeringmap_og_shape_png,
+                    ring_points_xy: 
+                        paired_paths,
 
                     _type: "treerings"
                 }
+            }
             else
                 return new Error('Unexpected error')
 
@@ -318,105 +325,66 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
 
 
-    #abort_handles:Set<number> = new Set()
+    async resize_mask(
+        mask:      File, 
+        work_size: ImageSize, 
+        og_size:   ImageSize
+    ): Promise<File|Error> {
 
-    resize_mask(mask:File, size:ImageSize): EncodingInProgess {
+        let read_cb_handle:number = 0;
 
-        let abort_handle:       pointer = 0;
-        let rc_ptr:             pointer;
-        let resized_png_pp:     pointer;
-        let resized_png_size_p: pointer;
-        // deno-lint-ignore no-unused-vars
-        let clean_up_in_finally:boolean = true;
-
-        const promise:Promise<File|Error> = new Promise( (resolve):void => {
-        
         try {
-            const read_cb_handle:number = this.#handle_counter++;
+            read_cb_handle = this.#handle_counter++;
             this.#read_file_callback_table[read_cb_handle] = mask;
 
-            rc_ptr             = this.#malloc(4, /*fill=*/255)
-            resized_png_pp     = this.#malloc(8);
-            resized_png_size_p = this.#malloc(8);
-            abort_handle       = this.#malloc(8);
+            const rc_ptr:number             = this.#malloc(4, /*fill=*/255)
+            const resized_png_pp:number     = this.#malloc(8);
+            const resized_png_size_p:number = this.#malloc(8);
 
-            this.#abort_handles.add(abort_handle)
-
-
-            const rc:number = this.wasm._resize_mask(
+            let rc:number = this.wasm._resize_mask(
                 mask.size, 
                 this.#read_file_callback_ptr, 
                 read_cb_handle, 
 
-                size.width, 
-                size.height,
-
-                abort_handle,
+                work_size.width, 
+                work_size.height,
+                og_size.width, 
+                og_size.height,
 
                 resized_png_pp,
                 resized_png_size_p,
 
                 rc_ptr
             )
-            if(rc == 0)
-                // so far no errors, continue, do not clean up
-                clean_up_in_finally = false;
-            
-        } catch (e) {
-            console.error('Unexpected error:', e)
-            resolve(e as Error);
-        } finally {
-            if(clean_up_in_finally){
-                this.#free_allocated_buffers();
-                if(abort_handle != 0)
-                    this.#abort_handles.delete(abort_handle)
-            }
-        }
+            // NOTE: the wasm function above returns before the execution is 
+            // finished because of async issues, so currently polling until done
+            while(this.wasm.Asyncify.currData != null)
+                await wait(1);
+    
+            rc = (rc == 0)? this.wasm.HEAP32[rc_ptr >> 2]! : rc;
+            if(rc != 0)
+                return new Error(`WASM error code = ${rc}`)
 
-        // deno-lint-ignore no-this-alias
-        const _this:this = this;
-        function poll_until_ready():void {
-            if(_this.wasm.Asyncify.currData != null){
-                setTimeout(poll_until_ready, 1);
-                return;
-            }
-
-            const rc:number = _this.wasm.HEAP32[rc_ptr >> 2]!;
-            if(rc != 0) {
-                resolve( new Error(`WASM error code = ${rc}`) )
-                return;
-            }
-
-            const resized_png_u8:Uint8Array<ArrayBuffer> 
-                = _this.#read_dynamic_output_buffer(
+            const resized_png_u8:Uint8Array<ArrayBuffer>|null
+                = this.#read_dynamic_output_buffer(
                     resized_png_pp,
                     resized_png_size_p
                 )
-            
-            _this.#free_allocated_buffers();
-            _this.#free_dynamic_buffer_outputs();
-            if(abort_handle != 0)
-                _this.#abort_handles.delete(abort_handle)
-            resolve(new File([resized_png_u8], mask.name));
+            if(resized_png_u8 == null)
+                return new Error(`WASM error: did not return file.`)
+
+            return new File([resized_png_u8], mask.name);
+
+        } catch (e) {
+            console.error('Unexpected error:', e)
+            return e as Error;
+        } finally {
+            if(read_cb_handle != 0)
+                delete this.#read_file_callback_table[read_cb_handle];
+            this.#free_allocated_buffers();
+            this.#free_dynamic_buffer_outputs();
         }
-        // NOTE: the wasm function above returns before the execution is 
-        // finished because of async issues, so currently polling until done
-        // also: await not allowed inside of a Promise function
-        poll_until_ready();
-
-        } )
-
-        return {file:promise, abort_handle}
     }
-
-    abort_resize(abort_handle: number): void {
-        if(this.#abort_handles.has(abort_handle)) {
-            this.wasm.HEAPU8[abort_handle] = 1;
-            this.#abort_handles.delete(abort_handle)
-        } else
-            console.error(`Abort requested for unknown handle: ${abort_handle}`)
-    }
-
 
 
 
@@ -469,9 +437,14 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
     #dynamic_output_buffers:pointer[] = []
 
     #read_dynamic_output_buffer(buffer_pp:pointer, size_p:pointer): 
-    Uint8Array<ArrayBuffer> {
+    Uint8Array<ArrayBuffer>|null {
+        if(buffer_pp == 0 || size_p == 0)
+            return null;
+
         const buffer_p:pointer = this.wasm.HEAP32[buffer_pp >> 2]!;
         const size:number = Number(this.wasm.HEAP64[size_p >> 3]);
+        if(buffer_p == 0 || size == 0)
+            return null;
 
         const data_u8:Uint8Array<ArrayBuffer> = this.wasm.HEAPU8.slice(
             buffer_p, 

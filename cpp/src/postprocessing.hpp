@@ -1,6 +1,7 @@
 #ifndef POSTPROCESSING_HPP
 #define POSTPROCESSING_HPP
 
+#include <optional>
 #include <vector>
 
 #include "./geometry.hpp"
@@ -33,8 +34,11 @@ Paths segmentation_to_paths(
 );
 
 struct TreeringsPostprocessingResult {
+    /** Treeringmap in the size that was used to process it. Encoded as PNG. */
     Buffer_p treeringmap_workshape_png;
-    Buffer_p treeringmap_og_shape_png;
+    
+    /** Treeringmap in the size of the original input. If nullopt, resize manually. */
+    std::optional<Buffer_p> treeringmap_og_shape_png;
 
     // scaled to og_shape
     PairedPaths ring_points_xy;
@@ -45,8 +49,11 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     size_t      filesize,
     const void* read_file_callback_p,
     const void* read_file_handle,
+    // shape: height first, width second
     const ImageShape& workshape,
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    // flag to skip resizing mask, takes too long in the browser
+    bool do_not_resize_to_og_shape = false
 );
 
 
