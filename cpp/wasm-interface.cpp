@@ -262,7 +262,8 @@ int resize_mask(
 
     const std::expected<Buffer_p, int> expect_resized_png = 
         resize_image_and_encode_as_png(
-            binary_to_rgba(mask),
+            // NOTE: keep as bool, for faster encoding
+            mask,
             {.width=og_shape_width, .height=og_shape_height}
         );
     if(!expect_resized_png){
