@@ -41,6 +41,8 @@ jobs:
 
   build-wasm:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3
         with:
@@ -83,10 +85,19 @@ jobs:
         if: ${{ github.event.inputs.release-wasm == 'true' }}
         run: |
           TAGNAME=v$(date +%F)
+          echo $TAGNAME
+          # note: backup file before git checkout
+          mkdir tmp
+          cp cpp/carrot-wasm-postprocessing.d.ts tmp/
+          cp cpp/build-wasm/bundle/carrot-wasm-postprocessing.js tmp/
+          #
           git fetch origin wasm-releases
           git checkout wasm-releases
-          git add cpp/build-wasm/bundle/carrot-wasm-postprocessing.js
-          git add cpp/carrot-wasm-postprocessing.d.ts
+          cp tmp/* ./
+          rm -r tmp
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ./carrot-wasm-postprocessing.*
           git commit -m "$TAGNAME"
           git tag --force $TAGNAME
           git push origin wasm-releases
