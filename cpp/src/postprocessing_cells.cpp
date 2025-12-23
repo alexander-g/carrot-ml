@@ -122,10 +122,13 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const void* read_file_callback_p,
     const void* read_file_handle,
     const ImageShape& workshape,
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    // flag to skip resizing mask, takes too long in the browser
+    bool do_not_resize_to_og_shape
 ) {
     // if not png: error?
 
+    printf("TODO: yes we do need cell delineation\n");
     // XXX: python had this: do we still need this?
     // if workshape != classmap.shape:
     //     instancemap_np, _ = \
@@ -166,18 +169,34 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     if(!instancemap_workshape_png_x)
         return std::unexpected("Failed to compress instancemap to png");
 
-    const std::expected<Buffer_p, int> cellmap_workshape_png_x = 
+    const std::expected<Buffer_p, int> expect_cellmap_workshape_png = 
         png_compress_image(
             to_uint8_p(mask.data()), 
             /*width=*/    mask.dimension(1),
             /*height=*/   mask.dimension(0),
             /*channels=*/ 1
         );
-    if(!cellmap_workshape_png_x)
+    if(!expect_cellmap_workshape_png)
         return std::unexpected("Failed to compress cellmap to png");
+    const Buffer_p cellmap_workshape_png = expect_cellmap_workshape_png.value();
+
+    std::optional<Buffer_p> cellmap_og_shape_png = std::nullopt;
+    if(workshape == og_shape)
+        cellmap_og_shape_png = cellmap_workshape_png;
+    else if(!do_not_resize_to_og_shape) {
+        const std::expected<Buffer_p, int> expect_cellmap_og_shape_png = 
+            resize_image_and_encode_as_png(
+                binary_to_rgba(mask),
+                {.width=(uint32_t)og_shape.second, .height=(uint32_t)og_shape.first}
+            );
+        if(!expect_cellmap_og_shape_png)
+            return std::unexpected("Failed to resize to og shape and compress");
+        cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
+    } //else dont resize here, takes too long
     
     return CellsPostprocessingResult{
-        /*cellmap_workshape_png     = */ cellmap_workshape_png_x.value(),
+        /*cellmap_workshape_png     = */ cellmap_workshape_png,
+        /*cellmap_og_shape_png      = */ cellmap_og_shape_png,
         /*instancemap_workshape_png = */ instancemap_workshape_png_x.value(),
         /*cells                     = */ std::move(cc_cells)
     };

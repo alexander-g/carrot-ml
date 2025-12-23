@@ -175,6 +175,11 @@ def test_postprocess_cellmapfile():
         PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
     )
     assert instancemap1.shape == workshape+(3,)
+
+    cellmap_workshape = PIL.Image.open( io.BytesIO(out1['cellmap_workshape_png']) )
+    cellmap_og_shape = PIL.Image.open( io.BytesIO(out1['cellmap_og_shape_png']) )
+    assert cellmap_workshape.size == workshape[::-1]
+    assert cellmap_og_shape.size  == og_shape[::-1]
     
     unique_colors = np.unique(instancemap1.reshape(-1,3), axis=0)
     assert len(unique_colors) == 5+1  # 5 objects + background

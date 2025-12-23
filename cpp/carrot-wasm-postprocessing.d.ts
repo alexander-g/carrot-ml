@@ -8,7 +8,10 @@ export type ImageSize   = {width: number, height:number};
 
 
 export type TreeringPostprocessingResult = {
+    /** Binary map with treerings of the size that was used for processing, as PNG */
     treeringmap_workshape_png: File;
+
+    /** Binary map with treerings of the size of original input image, as PNG */
     treeringmap_og_shape_png:  File|null;
 
     ring_points_xy: PairedPaths;
@@ -18,7 +21,13 @@ export type TreeringPostprocessingResult = {
 }
 
 export type CellsPostprocessingResult = {
+    /** Binary map with cells of the size that was used for processing, as PNG */
     cellmap_workshape_png: File;
+
+    /** Binary map with cells of the size of original input image, as PNG */
+    cellmap_og_shape_png: File|null;
+
+    /** Map with cells colored individually, as PNG */
     instancemap_workshape_png: File;
 
     /** For internal type checking to differentiate from other result types */
@@ -34,13 +43,12 @@ export type CellInfo = {
     position_within: number;
 }
 
-export type CombinedPostprocessingResult = {
-    cellmap_workshape_png: File;
-    instancemap_workshape_png: File;
-    
-    treeringmap_workshape_png: File;
-    ring_points_xy: PairedPaths;
+export type CombinedPostprocessingResult = 
+    Omit<TreeringPostprocessingResult, '_type'> 
+    & Omit<CellsPostprocessingResult,  '_type'> 
+    & {
 
+    /** Cells colored by treering, as PNG */
     ringmap_workshape_png: File;
 
     cell_info: CellInfo[];
