@@ -1,6 +1,7 @@
 #pragma once
 
 #include <expected>
+#include <optional>
 
 #include "./geometry.hpp"
 #include "../wasm-morpho/src/morphology.hpp"
@@ -8,8 +9,10 @@
 
 
 struct CellsPostprocessingResult {
+    /** Cellmap in the size that was used to process it. Encoded as PNG. */
     Buffer_p cellmap_workshape_png;
-    // EigenBinaryMap cellmap_ogshape;
+    /** Treeringmap in the size of the original input. If nullopt, resize manually. */
+    std::optional<Buffer_p> cellmap_og_shape_png;
 
     /** PNG image with cells individually colored */
     Buffer_p instancemap_workshape_png;
@@ -24,7 +27,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const void* read_file_callback_p,
     const void* read_file_handle,
     const ImageShape& workshape,
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    // flag to skip resizing mask, takes too long in the browser
+    bool do_not_resize_to_og_shape = false
 );
 
 

@@ -49,6 +49,8 @@ int postprocess_combined_wasm(
     // outputs
     uint8_t**   cellmap_workshape_png_pp,
     uint32_t*   cellmap_workshape_png_size_p,
+    uint8_t**   cellmap_og_shape_png_pp,
+    uint32_t*   cellmap_og_shape_png_size_p,
     uint8_t**   instancemap_workshape_png_pp,
     uint32_t*   instancemap_workshape_png_size_p,
     uint8_t**   treeringmap_workshape_png_pp,
@@ -86,7 +88,8 @@ int postprocess_combined_wasm(
             cellmap_read_file_callback_p, 
             cellmap_read_file_callback_handle, 
             {workshape_height, workshape_width},
-            {og_shape_height,  og_shape_width}
+            {og_shape_height,  og_shape_width},
+            /* do_not_resize_to_og_shape = */ true
         );
         if(!expect_output_cells){
             *returncode = POSTPROCESSING_CELLMAPFILE_FAILED;

@@ -41,6 +41,8 @@ type CARROT_Postprocessing_WASM = {
         // outputs
         cellmap_workshape_png:           pointer,
         cellmap_workshape_png_size:      pointer,
+        cellmap_og_shape_png:            pointer,
+        cellmap_og_shape_png_pp_size:    pointer,
         instancemap_workshape_png:       pointer,
         instancemap_workshape_png_size:  pointer,
         treeringmap_workshape_png:       pointer,
@@ -140,6 +142,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
         const cellmap_workshape_png_pp:pointer         = this.#malloc(8);
         const cellmap_workshape_png_size_p:pointer     = this.#malloc(8);
+        const cellmap_og_shape_png_pp:pointer         = this.#malloc(8);
+        const cellmap_og_shape_png_size_p:pointer     = this.#malloc(8);
         const instancemap_workshape_png_pp:pointer     = this.#malloc(8);
         const instancemap_workshape_png_size_p:pointer = this.#malloc(8);
         const treeringmap_workshape_png_pp:pointer     = this.#malloc(8);
@@ -169,6 +173,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                 cellmap_workshape_png_pp,
                 cellmap_workshape_png_size_p,
+                cellmap_og_shape_png_pp,
+                cellmap_og_shape_png_size_p,
                 instancemap_workshape_png_pp,
                 instancemap_workshape_png_size_p,
                 treeringmap_workshape_png_pp,
@@ -193,32 +199,59 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             if(rc != 0)
                 return new Error(`WASM error code = ${rc}`)
 
-            let cellmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
-            let instancemap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null;
+            let cellmap_workshape:File|null = null;
+            let cellmap_og_shape: File|null = null;
+            let instancemap_workshape:File|null = null;
             if(cellmap) {
-                cellmap_workshape_png_u8 = this.#read_dynamic_output_buffer(
-                    cellmap_workshape_png_pp, 
-                    cellmap_workshape_png_size_p
-                )
-                instancemap_workshape_png_u8 = this.#read_dynamic_output_buffer(
-                    instancemap_workshape_png_pp,
-                    instancemap_workshape_png_size_p
-                )
+                const cellmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = 
+                    this.#read_dynamic_output_buffer(
+                        cellmap_workshape_png_pp, 
+                        cellmap_workshape_png_size_p
+                    )
+                if(cellmap_workshape_png_u8 != null)
+                    cellmap_workshape = 
+                        new File([cellmap_workshape_png_u8], 'cellmap.png')
+                
+                const cellmap_og_shape_u8:Uint8Array<ArrayBuffer>|null = 
+                    this.#read_dynamic_output_buffer(
+                        cellmap_og_shape_png_pp,
+                        cellmap_og_shape_png_size_p
+                    )
+                if(cellmap_og_shape_u8 != null)
+                    cellmap_og_shape = new File([cellmap_og_shape_u8], 'cellmap.png')
+
+                const instancemap_workshape_png_u8:Uint8Array<ArrayBuffer>|null 
+                    = this.#read_dynamic_output_buffer(
+                        instancemap_workshape_png_pp,
+                        instancemap_workshape_png_size_p
+                    )
+                if(instancemap_workshape_png_u8 != null)
+                    instancemap_workshape = 
+                        new File([instancemap_workshape_png_u8], 'instancemap.png')
             }
 
 
-            let treeringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = null
-            let treeringmap_og_shape_png_u8:Uint8Array<ArrayBuffer>|null = null
+            let treeringmap_workshape_shape_png: File|null = null;
+            let treeringmap_og_shape_png:        File|null = null;
             let paired_paths:PairedPaths|null = null;
             if(treeringmap) {
-                treeringmap_workshape_png_u8 = this.#read_dynamic_output_buffer(
-                    treeringmap_workshape_png_pp,
-                    treeringmap_workshape_png_size_p
-                )
-                treeringmap_og_shape_png_u8 = this.#read_dynamic_output_buffer(
-                    treeringmap_og_shape_png_pp,
-                    treeringmap_og_shape_png_size_p
-                )
+                const treeringmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null 
+                    = this.#read_dynamic_output_buffer(
+                        treeringmap_workshape_png_pp,
+                        treeringmap_workshape_png_size_p
+                    )
+                if(treeringmap_workshape_png_u8 != null)
+                    treeringmap_workshape_shape_png = 
+                        new File([treeringmap_workshape_png_u8], 'treeringmap.png')
+                
+                const treeringmap_og_shape_png_u8:Uint8Array<ArrayBuffer>|null 
+                    = this.#read_dynamic_output_buffer(
+                        treeringmap_og_shape_png_pp,
+                        treeringmap_og_shape_png_size_p
+                    )
+                if(treeringmap_og_shape_png_u8 != null)
+                    treeringmap_og_shape_png = 
+                        new File([treeringmap_og_shape_png_u8], 'treeringmap.png')
 
                 const ring_points_xy_json_u8:Uint8Array|null = 
                     this.#read_dynamic_output_buffer(
@@ -256,21 +289,21 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     return new Error('WASM-JS communication inconcistencies')
             }
 
-            if(cellmap_workshape_png_u8 
-            && instancemap_workshape_png_u8 
-            && treeringmap_workshape_png_u8 
+            if(cellmap_workshape 
+            && cellmap_og_shape
+            && instancemap_workshape 
+            && treeringmap_workshape_shape_png 
             && paired_paths 
             && cell_info
             && ringmap_workshape_png_u8)
                 return {
-                    cellmap_workshape_png: 
-                        new File([cellmap_workshape_png_u8], 'cellmap.png'),
-                    instancemap_workshape_png: 
-                        new File([instancemap_workshape_png_u8], 'instancemap.png'),
+                    cellmap_workshape_png:     cellmap_workshape,
+                    cellmap_og_shape_png:      cellmap_og_shape,
+                    instancemap_workshape_png: instancemap_workshape,
                     
-                    treeringmap_workshape_png:
-                        new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
-                    ring_points_xy: paired_paths,
+                    treeringmap_workshape_png: treeringmap_workshape_shape_png,
+                    treeringmap_og_shape_png:  treeringmap_og_shape_png,
+                    ring_points_xy:            paired_paths,
 
                     ringmap_workshape_png:
                         new File([ringmap_workshape_png_u8], 'ringmap.png'),
@@ -278,28 +311,19 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                     _type: "combined",
                 };
-            else if(cellmap_workshape_png_u8 && instancemap_workshape_png_u8)
+            else if(cellmap_workshape && cellmap_og_shape && instancemap_workshape)
                 return {
-                    cellmap_workshape_png: 
-                        new File([cellmap_workshape_png_u8], 'cellmap.png'),
-                    instancemap_workshape_png: 
-                        new File([instancemap_workshape_png_u8], 'instancemap.png'),
+                    cellmap_workshape_png:     cellmap_workshape,
+                    cellmap_og_shape_png:      cellmap_og_shape,
+                    instancemap_workshape_png: instancemap_workshape,
                     
                     _type: "cells"
                 }
-            else if(treeringmap_workshape_png_u8 && paired_paths){
-                const treeringmap_og_shape_png:File|null = 
-                    (treeringmap_og_shape_png_u8 != null)
-                    ? new File([treeringmap_og_shape_png_u8], 'treeringmap.png')
-                    : null;
-
+            else if(treeringmap_workshape_shape_png && paired_paths){
                 return {
-                    treeringmap_workshape_png:
-                        new File([treeringmap_workshape_png_u8], 'treeringmap.png'),
-                    treeringmap_og_shape_png: 
-                        treeringmap_og_shape_png,
-                    ring_points_xy: 
-                        paired_paths,
+                    treeringmap_workshape_png: treeringmap_workshape_shape_png,
+                    treeringmap_og_shape_png:  treeringmap_og_shape_png,
+                    ring_points_xy:            paired_paths,
 
                     _type: "treerings"
                 }
@@ -436,6 +460,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
     #dynamic_output_buffers:pointer[] = []
 
+    /** Read an outputbuffer, whose size is not known in advance */
     #read_dynamic_output_buffer(buffer_pp:pointer, size_p:pointer): 
     Uint8Array<ArrayBuffer>|null {
         if(buffer_pp == 0 || size_p == 0)

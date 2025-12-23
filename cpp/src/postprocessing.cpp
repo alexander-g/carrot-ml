@@ -957,7 +957,6 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
             /*height=*/   mask.dimension(0),
             /*channels=*/ 1
         );
-    
     if(!expect_treeringmap_workshape_png)
         return std::nullopt;
     const Buffer_p treeringmap_workshape_png = *expect_treeringmap_workshape_png;
@@ -966,7 +965,6 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
     if(workshape == og_shape)
         treeringmap_og_shape_png = treeringmap_workshape_png;
     else if(!do_not_resize_to_og_shape) {
-    //else if(true) {
         const std::expected<Buffer_p, int> expect_treeringmap_og_shape_png = 
             resize_image_and_encode_as_png(
                 binary_to_rgba(mask),
