@@ -2,11 +2,13 @@ name: CI
 
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      release-wasm:
+        type: boolean
+        default: false
 
 
 jobs:
@@ -76,5 +78,18 @@ jobs:
             cpp/build-wasm/bundle/carrot-wasm-postprocessing.js
             cpp/carrot-wasm-postprocessing.d.ts
           if-no-files-found: error
+
+      - name: Release
+        if: ${{ github.event.inputs.release-wasm == 'true' }}
+        run: |
+          TAGNAME=v$(date +%F)
+          git fetch origin wasm-releases
+          git checkout wasm-releases
+          git add cpp/build-wasm/bundle/carrot-wasm-postprocessing.js
+          git add cpp/carrot-wasm-postprocessing.d.ts
+          git commit -m "$TAGNAME"
+          git tag --force $TAGNAME
+          git push origin wasm-releases
+          git push origin --tags
 
 
