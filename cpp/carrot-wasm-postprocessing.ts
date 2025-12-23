@@ -290,7 +290,6 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             }
 
             if(cellmap_workshape 
-            && cellmap_og_shape
             && instancemap_workshape 
             && treeringmap_workshape_shape_png 
             && paired_paths 
@@ -311,7 +310,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                     _type: "combined",
                 };
-            else if(cellmap_workshape && cellmap_og_shape && instancemap_workshape)
+            else if(cellmap_workshape && instancemap_workshape)
                 return {
                     cellmap_workshape_png:     cellmap_workshape,
                     cellmap_og_shape_png:      cellmap_og_shape,

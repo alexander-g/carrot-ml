@@ -95,7 +95,7 @@ py::dict postprocess_treeringmapfile_py(
     d["treeringmap_workshape_png"] = 
         buffer_to_bytes(*output.treeringmap_workshape_png);
     d["treeringmap_ogshape_png"] = 
-        buffer_to_bytes(*output.treeringmap_og_shape_png.value());
+        buffer_to_bytes(*output.treeringmap_og_shape_png.value()); // not nullopt
     d["ring_points_xy"] = vec_paired_paths_to_numpy(output.ring_points_xy);
     return d;
 }
@@ -123,6 +123,8 @@ py::dict postprocess_cellmapfile_py(
     py::dict d;
     d["cellmap_workshape_png"] = 
         buffer_to_bytes(*output_x->cellmap_workshape_png);
+    d["cellmap_og_shape_png"] = 
+        buffer_to_bytes(*output_x->cellmap_og_shape_png.value()); // not nullopt
     d["instancemap_workshape_png"] = 
         buffer_to_bytes(*output_x->instancemap_workshape_png);
     return d;
