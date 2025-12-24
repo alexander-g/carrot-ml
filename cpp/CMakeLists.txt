@@ -27,6 +27,7 @@ add_subdirectory(./wasm-morpho EXCLUDE_FROM_ALL)
 add_subdirectory(./wasm-big-image EXCLUDE_FROM_ALL)
 set_target_properties(wasm_png PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(png_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zlibstatic PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 
 add_library(carrot_postprocessing_core STATIC 
