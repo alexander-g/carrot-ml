@@ -51,6 +51,7 @@ def postprocess_treeringmapfile(
 
 
     ring_labels = associate_boundaries(ring_paths_yx)
+    ring_paths_yx = resample_paths(ring_paths_yx)
     ring_points = [
         associate_pathpoints(ring_paths_yx[r0-1], ring_paths_yx[r1-1]) 
             for r0,r1 in ring_labels
@@ -647,24 +648,21 @@ def path_distances(path):
 def path_length(path):
     return path_distances(path).sum()
 
+def resample_paths(paths:tp.List[np.ndarray]) -> tp.List[np.ndarray]:
+    output = []
+    for path in paths:
+        u0       = np.cumsum(path_distances(path))
+        u0       = np.concatenate([[0],u0])
+        tck0, u0 = scipy.interpolate.splprep(path.T, k=1, u=u0)
+
+        step = path_length(path) / 20;
+        t0       = np.concatenate( [np.arange(0, u0[-1], step), u0[-1:]] )
+        path0    = np.stack(scipy.interpolate.splev(t0, tck0),-1)
+        output.append(path0)
+    return output
+
 def associate_pathpoints(path0, path1) -> tp.Tuple[np.ndarray, np.ndarray]:
     '''Group points from path 0 to corresponding points from path 1'''
-    u0       = np.cumsum(path_distances(path0))
-    u0       = np.concatenate([[0],u0])
-    tck0, u0 = scipy.interpolate.splprep(path0.T, k=1, u=u0)
-    
-    u1       = np.cumsum(path_distances(path1))
-    u1       = np.concatenate([[0],u1])
-    tck1, u1 = scipy.interpolate.splprep(path1.T, k=1, u=u1)
-    
-    #resample the path equidistantly
-    #step     = 64
-    step     = min(path_length(path0), path_length(path1)) / 10
-    t0       = np.concatenate( [np.arange(0, u0[-1], step), u0[-1:]] )
-    path0    = np.stack(scipy.interpolate.splev(t0, tck0),-1)
-    t1       = np.concatenate( [np.arange(0, u1[-1], step), u1[-1:]] )
-    path1    = np.stack(scipy.interpolate.splev(t1, tck1),-1)
-    
     flipped  = len(path0) < len(path1)
     if flipped:
         path0, path1 = path1, path0

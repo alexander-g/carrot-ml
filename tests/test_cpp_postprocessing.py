@@ -102,6 +102,64 @@ def test_postprocess_treeringmapfile():
     assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
 
 
+
+
+# chatgpt:
+def intersection_points(a: np.ndarray, b: np.ndarray, tol: float = 1e-6) -> np.ndarray:
+    """
+    Simple and fast: returns common 2D points between a and b (shape [N,2], dtype float32)
+    within Euclidean tolerance `tol`. Result dtype float32, unique rows.
+    """
+    a = np.asarray(a, dtype=np.float32).reshape(-1, 2)
+    b = np.asarray(b, dtype=np.float32).reshape(-1, 2)
+    if a.size == 0 or b.size == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    # Use broadcasting in chunks to avoid huge memory for large arrays
+    # Choose chunk size to balance memory vs speed
+    chunk = 4096
+    matches = []
+    for i in range(0, a.shape[0], chunk):
+        ai = a[i:i+chunk, None, :]            # (chunk, 1, 2)
+        diff = ai - b[None, :, :]             # (chunk, M, 2)
+        d2 = np.sum(diff * diff, axis=2)      # squared distances
+        close_mask = np.any(d2 <= tol * tol, axis=1)
+        if np.any(close_mask):
+            matches.append(a[i:i+chunk][close_mask])
+    if not matches:
+        return np.empty((0, 2), dtype=np.float32)
+
+    common = np.vstack(matches)
+    return common
+
+
+# bug: make sure points of neighboring pairs overlap, or else looks ugly in the ui
+def test_use_same_points():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10:-10, 100:110] = 1
+    mask[50:-50, 200:250] = 1
+    mask[10:-10, 300:350] = 1
+    mask[10:-10, 600:605] = 1
+    mask[10:-10, 800] = 1
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (555,555)
+    og_shape  = mask.shape
+    out1 = postp.postprocess_treeringmapfile(maskf, workshape, og_shape)
+
+    pairs = out1['ring_points_xy']
+    assert len(pairs) > 0
+    for pair0, pair1 in zip(pairs, pairs[1:]):
+        common_points = intersection_points(pair0[1][1:-1], pair1[0][1:-1], tol=0.01 )
+        # print(pair0[1])
+        # print(pair1[0])
+        # print(common_points)
+        # print()
+        assert len(common_points) > 0
+
+
 def test_postprocess_treeringmapfile2():
     imgf2 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap0.png' )
     out2 = postp.postprocess_treeringmapfile(imgf2, (2700,3375), (2048,2048))
