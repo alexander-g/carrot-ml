@@ -347,6 +347,11 @@ def test_postprocessing_combined():
     for c in output['cell_info']:
         if c['year_index'] >= 0:
             assert 0 <= c['position_within'] <= 1
+    
+    # bug: boxes in og shape
+    all_cellboxes = np.array([c['box_xy'] for c in output['cell_info']])
+    assert workshape[0] < all_cellboxes.max(axis=0)[1] <= og_shape[0]
+    assert workshape[1] < all_cellboxes.max(axis=0)[0] <= og_shape[1]
 
     instancemap1 = np.array(
         PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) )

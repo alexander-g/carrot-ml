@@ -370,16 +370,16 @@ std::vector<Path> polygons_from_treeringspaths(const PairedPaths& treering_paths
     return output;
 }
 
-std::optional<Box> box_from_indices(const Indices2D& indices) {
-    if(indices.empty())
+std::optional<Box> box_from_points(const Points& points) {
+    if(points.empty())
         return std::nullopt;
 
     Box output{ INFINITY, INFINITY, -INFINITY, -INFINITY };
-    for(const Index2D& index: indices){
-        output.x0 = std::min(output.x0, (double)index.j);
-        output.y0 = std::min(output.y0, (double)index.i);
-        output.x1 = std::max(output.x1, (double)index.j);
-        output.y1 = std::max(output.y1, (double)index.i);
+    for(const Point& p: points){
+        output.x0 = std::min(output.x0, p[0]);
+        output.y0 = std::min(output.y0, p[1]);
+        output.x1 = std::max(output.x1, p[0]);
+        output.y1 = std::max(output.y1, p[1]);
     }
     return output;
 }
@@ -487,7 +487,7 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
 
         cell_info.push_back(CellInfo{
             .id         = i,
-            .box_xy     = box_from_indices(cell_indices).value_or(Box{0,0,0,0}),
+            .box_xy     = box_from_points(cellpoints).value_or(Box{0,0,0,0}),
             .year_index = treering,
             .area_px    = (double)npixels,
             .position_within = position_within
