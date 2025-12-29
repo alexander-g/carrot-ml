@@ -205,11 +205,11 @@ MaskAndCC scale_objects_and_create_mask(
             if( mask(quant_p.i, quant_p.j) == true )
                 continue;
 
-            auto cropslice = crop_3x3_around_index(instancemap, quant_p);
+            const auto cropslice = crop_3x3_around_index(instancemap, quant_p);
             if( contains_other_nonzero(EigenIntMap(cropslice), object_label) )
                 continue;
 
-            cropslice.setConstant(object_label);
+            instancemap(quant_p.i, quant_p.j) = object_label;
             mask(quant_p.i, quant_p.j) = true;
             quantized_object.push_back(quant_p);
         }

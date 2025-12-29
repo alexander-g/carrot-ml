@@ -288,14 +288,19 @@ def test_postprocess_cellmapfile_ensure_delineated():
     instancemap2 = np.array(
         PIL.Image.open( io.BytesIO(out2['instancemap_workshape_png']) )
     )
-
-
     counts2 = np.unique(instancemap2.reshape(-1,3), axis=0, return_counts=True)[1]
     # should be still 4 + 1
     assert len( counts2 ) == 5
 
     # sizes should be unchanged
     assert sorted(counts1.tolist()) == sorted(counts2.tolist())
+
+    # bug: make sure the delineation boundary is at most 1px wide
+    out3 = postp.postprocess_cellmapfile(maskf, og_shape, og_shape)
+    instancemap3 = np.array(
+        PIL.Image.open( io.BytesIO(out3['instancemap_workshape_png']) )
+    )
+    assert (instancemap3.any(-1)[310, 140:164] == 0).sum() == 1 # type: ignore
 
 
 
