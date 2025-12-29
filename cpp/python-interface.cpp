@@ -176,7 +176,10 @@ py::dict postprocess_combined_from_files_py(
             og_shape
         );
     if(!expect_output_combined)
-        throw std::runtime_error("Combined postprocessing failed");
+        throw std::runtime_error(
+            "Combined postprocessing failed:" 
+            + expect_output_combined.error()
+        );
     const CombinedPostprocessingResult& output_combined = *expect_output_combined;
 
 

@@ -689,15 +689,20 @@ Path resample_path(const Path& path, double step) {
     return output;
 }
 
+Paths resample_paths(const Paths& paths) {
+    Paths output;
+    for(const auto& path: paths) {
+        const double step = path_length(path) / 20;
+        output.push_back( resample_path(path, step) );
+    }
+    return output;
+}
+
 
 
 /** Group points from path 0 to corresponding points from path 1 */
 PathPair associate_pathpoints(const Path& path0, const Path& path1) {
-    const double step = std::min( path_length(path0), path_length(path1) ) / 10;
-    // TODO: how to handle step == 0
-
-    Path resampledpath0 = resample_path(path0, step);
-    Path resampledpath1 = resample_path(path1, step);
+    Path resampledpath0 = path0, resampledpath1 = path1;
 
     const bool flipped = (resampledpath0.size() < resampledpath1.size());
     if(flipped)
@@ -895,16 +900,6 @@ Paths segmentation_to_paths(
 
 
 
-Paths scale_paths(
-    const Paths& paths, 
-    const ImageShape& from_shape, 
-    const ImageShape& to_shape
-) {
-    Paths output;
-    for(const Path& path: paths)
-        output.push_back( scale_points(path, from_shape, to_shape) );
-    return output;
-}
 
 
 std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
@@ -935,9 +930,11 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
           Paths merged_paths = merge_paths(simple_paths, workshape);
 
     if(og_shape != workshape)
-        merged_paths = scale_paths(merged_paths, workshape, og_shape);
+        merged_paths = scale_list_of_points(merged_paths, workshape, og_shape);
 
     const std::vector<IntPair> ring_labels = associate_boundaries(merged_paths);
+
+    merged_paths = resample_paths(merged_paths);
     PairedPaths paired_paths;
     for(const IntPair& labelpair: ring_labels)
         paired_paths.push_back(

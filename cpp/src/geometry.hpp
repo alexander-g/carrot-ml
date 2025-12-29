@@ -5,15 +5,19 @@
 #include <utility>
 #include <vector>
 
-
+// x first, y second
 typedef std::array<double, 2> Point;
 typedef std::array<double, 2> Vector;
 typedef std::vector<Point>    Points;
 typedef std::vector<Point>    Path;
 typedef std::vector<Path>     Paths;
+typedef std::vector<Points>   ListOfPoints;
 typedef std::pair<Path, Path> PathPair;
 typedef std::vector<PathPair> PairedPaths;
+
+// NOTE: height first, width second
 typedef std::pair<int,int>    ImageShape;
+
 
 struct Box {
     double x0; // left
@@ -44,6 +48,14 @@ Points scale_points(
     const Points& points_xy, 
     const ImageShape& from_shape, 
     const ImageShape& to_shape
+);
+
+/** Rescale nested points from one image shape to another.
+    Points are expected to be in XY format, shapes in HW. */
+ListOfPoints scale_list_of_points(
+    const ListOfPoints& points_xy,
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape 
 );
 
 

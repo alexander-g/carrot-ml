@@ -6,6 +6,7 @@ import tempfile
 
 import numpy as np
 import PIL.Image
+import scipy
 
 import carrot_postprocessing_ext as postp
 from src import treerings_clustering_legacy as postp_legacy
@@ -102,6 +103,64 @@ def test_postprocess_treeringmapfile():
     assert PIL.Image.open( io.BytesIO(out1['treeringmap_ogshape_png']) ).size == og_shape
 
 
+
+
+# chatgpt:
+def intersection_points(a: np.ndarray, b: np.ndarray, tol: float = 1e-6) -> np.ndarray:
+    """
+    Simple and fast: returns common 2D points between a and b (shape [N,2], dtype float32)
+    within Euclidean tolerance `tol`. Result dtype float32, unique rows.
+    """
+    a = np.asarray(a, dtype=np.float32).reshape(-1, 2)
+    b = np.asarray(b, dtype=np.float32).reshape(-1, 2)
+    if a.size == 0 or b.size == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    # Use broadcasting in chunks to avoid huge memory for large arrays
+    # Choose chunk size to balance memory vs speed
+    chunk = 4096
+    matches = []
+    for i in range(0, a.shape[0], chunk):
+        ai = a[i:i+chunk, None, :]            # (chunk, 1, 2)
+        diff = ai - b[None, :, :]             # (chunk, M, 2)
+        d2 = np.sum(diff * diff, axis=2)      # squared distances
+        close_mask = np.any(d2 <= tol * tol, axis=1)
+        if np.any(close_mask):
+            matches.append(a[i:i+chunk][close_mask])
+    if not matches:
+        return np.empty((0, 2), dtype=np.float32)
+
+    common = np.vstack(matches)
+    return common
+
+
+# bug: make sure points of neighboring pairs overlap, or else looks ugly in the ui
+def test_use_same_points():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10:-10, 100:110] = 1
+    mask[50:-50, 200:250] = 1
+    mask[10:-10, 300:350] = 1
+    mask[10:-10, 600:605] = 1
+    mask[10:-10, 800] = 1
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (555,555)
+    og_shape  = mask.shape
+    out1 = postp.postprocess_treeringmapfile(maskf, workshape, og_shape)
+
+    pairs = out1['ring_points_xy']
+    assert len(pairs) > 0
+    for pair0, pair1 in zip(pairs, pairs[1:]):
+        common_points = intersection_points(pair0[1][1:-1], pair1[0][1:-1], tol=0.01 )
+        # print(pair0[1])
+        # print(pair1[0])
+        # print(common_points)
+        # print()
+        assert len(common_points) > 0
+
+
 def test_postprocess_treeringmapfile2():
     imgf2 = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap0.png' )
     out2 = postp.postprocess_treeringmapfile(imgf2, (2700,3375), (2048,2048))
@@ -196,6 +255,49 @@ def test_postprocess_cellmapfile():
     assert n1 == n2
 
 
+# bug: cells that are close together get recognized as one due to smaller workshape
+def test_postprocess_cellmapfile_ensure_delineated():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10 :-10,  20:50] = 1
+    mask[100:-100, 51:133] = 1
+    mask[300:-300, 134:162] = 1
+    mask[300:-300, 163:164] = 1  # thin one (gets swallowed by previous)
+    
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (119,119)
+    og_shape  = mask.shape
+    out1 = postp.postprocess_cellmapfile(maskf, workshape, og_shape)
+
+    instancemap1 = np.array(
+        PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
+    )
+    counts1 = np.unique(instancemap1.reshape(-1,3), axis=0, return_counts=True)[1]
+    # 4 cells + background:
+    assert len( counts1 ) == 5
+
+
+    # re-postprocess on the output mask
+
+    remaskf = os.path.join(tempdir.name, 'testmask2.png')
+    open(remaskf, 'wb').write(out1['cellmap_og_shape_png'])
+    out2 = postp.postprocess_cellmapfile(remaskf, workshape, og_shape)
+
+    instancemap2 = np.array(
+        PIL.Image.open( io.BytesIO(out2['instancemap_workshape_png']) )
+    )
+
+
+    counts2 = np.unique(instancemap2.reshape(-1,3), axis=0, return_counts=True)[1]
+    # should be still 4 + 1
+    assert len( counts2 ) == 5
+
+    # sizes should be unchanged
+    assert sorted(counts1.tolist()) == sorted(counts2.tolist())
+
+
 
 
 def test_points_in_polygon():
@@ -230,7 +332,9 @@ def test_postprocessing_combined():
     og_shape  = (2000,2000)
     output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
 
-    assert len( output['cell_info'] ) == 479
+    mask = np.array(PIL.Image.open(cellmapfile).convert('L'))
+    _, expected_n_cells = scipy.ndimage.label(mask)
+    assert len( output['cell_info'] ) == expected_n_cells
 
     year_indices = [ c['year_index'] for c in output['cell_info'] ]
     # 3 full rings + incomplete ones counted as -1
