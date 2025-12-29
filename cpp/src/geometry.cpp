@@ -119,3 +119,19 @@ Points scale_points(
         output.push_back({point[0] * scale.second, point[1] * scale.first});
     return output;
 }
+
+
+/** Rescale nested points from one image shape to another.
+    Points are expected to be in XY format, shapes in HW. */
+ListOfPoints scale_list_of_points(
+    const ListOfPoints& points_xy,
+    const ImageShape& from_shape, 
+    const ImageShape& to_shape 
+) {
+    ListOfPoints output;
+    for(const Points& path: points_xy)
+        output.push_back( scale_points(path, from_shape, to_shape) );
+    return output;
+}
+
+

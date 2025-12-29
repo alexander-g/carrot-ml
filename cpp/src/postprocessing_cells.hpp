@@ -18,7 +18,7 @@ struct CellsPostprocessingResult {
     Buffer_p instancemap_workshape_png;
 
     /** Cell points as detected by connected components */
-    CCResult cells;
+    std::vector<Indices2D> cells;
 };
 
 
@@ -55,7 +55,7 @@ struct CombinedPostprocessingResult {
 
 std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     const PairedPaths& treering_paths,
-    const CCResult&    cells,
+    const std::vector<Indices2D>& cells,
     const ImageShape&  workshape,
     const ImageShape&  og_shape
 );

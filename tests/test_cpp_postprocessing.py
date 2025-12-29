@@ -6,6 +6,7 @@ import tempfile
 
 import numpy as np
 import PIL.Image
+import scipy
 
 import carrot_postprocessing_ext as postp
 from src import treerings_clustering_legacy as postp_legacy
@@ -254,6 +255,49 @@ def test_postprocess_cellmapfile():
     assert n1 == n2
 
 
+# bug: cells that are close together get recognized as one due to smaller workshape
+def test_postprocess_cellmapfile_ensure_delineated():
+    mask = np.zeros([1000,1000], dtype=bool)
+    mask[10 :-10,  20:50] = 1
+    mask[100:-100, 51:133] = 1
+    mask[300:-300, 134:162] = 1
+    mask[300:-300, 163:164] = 1  # thin one (gets swallowed by previous)
+    
+    tempdir = tempfile.TemporaryDirectory()
+    maskf = os.path.join(tempdir.name, 'testmask.png')
+    PIL.Image.fromarray(mask).save(maskf)
+
+    workshape = (119,119)
+    og_shape  = mask.shape
+    out1 = postp.postprocess_cellmapfile(maskf, workshape, og_shape)
+
+    instancemap1 = np.array(
+        PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
+    )
+    counts1 = np.unique(instancemap1.reshape(-1,3), axis=0, return_counts=True)[1]
+    # 4 cells + background:
+    assert len( counts1 ) == 5
+
+
+    # re-postprocess on the output mask
+
+    remaskf = os.path.join(tempdir.name, 'testmask2.png')
+    open(remaskf, 'wb').write(out1['cellmap_og_shape_png'])
+    out2 = postp.postprocess_cellmapfile(remaskf, workshape, og_shape)
+
+    instancemap2 = np.array(
+        PIL.Image.open( io.BytesIO(out2['instancemap_workshape_png']) )
+    )
+
+
+    counts2 = np.unique(instancemap2.reshape(-1,3), axis=0, return_counts=True)[1]
+    # should be still 4 + 1
+    assert len( counts2 ) == 5
+
+    # sizes should be unchanged
+    assert sorted(counts1.tolist()) == sorted(counts2.tolist())
+
+
 
 
 def test_points_in_polygon():
@@ -288,7 +332,9 @@ def test_postprocessing_combined():
     og_shape  = (2000,2000)
     output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
 
-    assert len( output['cell_info'] ) == 479
+    mask = np.array(PIL.Image.open(cellmapfile).convert('L'))
+    _, expected_n_cells = scipy.ndimage.label(mask)
+    assert len( output['cell_info'] ) == expected_n_cells
 
     year_indices = [ c['year_index'] for c in output['cell_info'] ]
     # 3 full rings + incomplete ones counted as -1

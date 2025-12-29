@@ -900,16 +900,6 @@ Paths segmentation_to_paths(
 
 
 
-Paths scale_paths(
-    const Paths& paths, 
-    const ImageShape& from_shape, 
-    const ImageShape& to_shape
-) {
-    Paths output;
-    for(const Path& path: paths)
-        output.push_back( scale_points(path, from_shape, to_shape) );
-    return output;
-}
 
 
 std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
@@ -940,7 +930,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
           Paths merged_paths = merge_paths(simple_paths, workshape);
 
     if(og_shape != workshape)
-        merged_paths = scale_paths(merged_paths, workshape, og_shape);
+        merged_paths = scale_list_of_points(merged_paths, workshape, og_shape);
 
     const std::vector<IntPair> ring_labels = associate_boundaries(merged_paths);
 
