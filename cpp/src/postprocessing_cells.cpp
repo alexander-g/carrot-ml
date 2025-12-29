@@ -450,6 +450,20 @@ int find_treering_for_cell(
     return largest_overlapping_treering;
 }
 
+/** Estimate the area of a cell from worksize points scaled up to og size */
+double estimate_cell_area_scaled(
+    const Points& cellpoints, 
+    const ImageSize& worksize, 
+    const ImageSize& og_size
+) {
+    const int n_points = cellpoints.size();
+    const double scale_x = og_size.width / worksize.width;
+    const double scale_y = og_size.height / worksize.height;
+
+    // a point in worksize counts as 1px x 1px, 
+    return (1 * scale_x) * (1 * scale_y) * n_points;
+}
+
 
 std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     const PairedPaths& treering_paths,
@@ -471,12 +485,13 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
             workshape,
             og_shape
         );
-        const int npixels = cellpoints.size();
-        //if(npixels == 0) // should not happen
-        //    continue;
-
         const int treering = find_treering_for_cell(treering_polygons, cellpoints);
 
+        const double area_cell = estimate_cell_area_scaled(
+            cellpoints, 
+            {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first},
+            {.width = (uint32_t)og_shape.second,  .height = (uint32_t)og_shape.first}
+        );
         const double position_within = 
             (treering >= 0)
             ? estimate_position_within_treering(
@@ -489,7 +504,7 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
             .id         = i,
             .box_xy     = box_from_points(cellpoints).value_or(Box{0,0,0,0}),
             .year_index = treering,
-            .area_px    = (double)npixels,
+            .area_px    = area_cell,
             .position_within = position_within
         });
     }

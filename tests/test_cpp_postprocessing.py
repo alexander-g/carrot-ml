@@ -333,12 +333,13 @@ def test_postprocessing_combined():
     treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap3-combined.png' )
     cellmapfile = os.path.join( os.path.dirname(__file__), 'assets', 'cellmap3-combined.png' )
 
+    mask = np.array(PIL.Image.open(cellmapfile).convert('L')).astype(bool)
+    labeled_mask, expected_n_cells = scipy.ndimage.label(mask)
+
     workshape = (777,777)
-    og_shape  = (2000,2000)
+    og_shape  = mask.shape
     output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
 
-    mask = np.array(PIL.Image.open(cellmapfile).convert('L'))
-    _, expected_n_cells = scipy.ndimage.label(mask)
     assert len( output['cell_info'] ) == expected_n_cells
 
     year_indices = [ c['year_index'] for c in output['cell_info'] ]
@@ -352,6 +353,12 @@ def test_postprocessing_combined():
     all_cellboxes = np.array([c['box_xy'] for c in output['cell_info']])
     assert workshape[0] < all_cellboxes.max(axis=0)[1] <= og_shape[0]
     assert workshape[1] < all_cellboxes.max(axis=0)[0] <= og_shape[1]
+
+    # bug: areas also in og shape
+    object_areas_scipy = scipy.ndimage.sum_labels(mask, labeled_mask, index=np.arange(expected_n_cells))
+    all_cellareas = np.array([c['area_px'] for c in output['cell_info']])
+    assert object_areas_scipy.max() * 0.9 < all_cellareas.max()  # very approximate
+
 
     instancemap1 = np.array(
         PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) )
