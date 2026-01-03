@@ -110,8 +110,48 @@ Deno.test('resize_mask', async () => {
     const treeringmapfile1 = new File([Deno.readFileSync(filepath1)], 'treerrings.png')
 
 
-    const worksize = {width:400, height:400}
+    //const worksize = {width:400, height:400}
+    const worksize = {width:3297, height:4379}
     const targetsize = {width:10001, height:10002}
     const encoded = await module.resize_mask(treeringmapfile1, worksize, targetsize)
     asserts.assertInstanceOf(encoded, File)
+
 })
+
+
+// bug: this file failed in wasm because of OOM
+// bug2: also resize_mask merges cells
+Deno.test('cellmapfile5', async () => {
+    const module = await initialize();
+
+    const worksize = {width: 10715, height: 1866}
+    const og_size = {width: 77762, height: 13544}
+    
+    const filepath1 = import.meta.resolve('./assets/cellmap5.png').replace('file://','')
+    const cellmapfile1 = new File([Deno.readFileSync(filepath1)], 'cellmap.png')
+
+    const output1 = await module.postprocess_combined(cellmapfile1, null, worksize, og_size)
+    console.log(output1)
+    asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert(output1._type == 'cells')
+    asserts.assertExists(output1.cellmap_og_shape_png)
+
+    //Deno.writeFileSync("DEBUG/DELETE.worksize.png", await output1.cellmap_workshape_png.bytes())
+
+    // const resize_output = await module.resize_mask(output1.cellmap_workshape_png, worksize, og_size)
+    // asserts.assertNotInstanceOf(resize_output, Error)
+
+    // Deno.writeFileSync("DEBUG/DELETE.resized.png", await resize_output.bytes())
+
+    // re-postprocess
+    const output2 = await module.postprocess_combined(output1.cellmap_og_shape_png, null, worksize, og_size)
+    console.log(output2)
+    asserts.assertNotInstanceOf(output2, Error)
+    asserts.assert(output2._type == 'cells')
+
+    //Deno.writeFileSync("DEBUG/DELETE.worksize2.png", await output2.cellmap_workshape_png.bytes())
+
+    // both masks should be the same, quick test
+    asserts.assertEquals(output1.cellmap_workshape_png.size, output2.cellmap_workshape_png.size)
+})
+

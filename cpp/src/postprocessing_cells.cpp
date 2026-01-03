@@ -9,6 +9,7 @@
 #include "./image-utils.hpp"
 #include "./postprocessing_cells.hpp"
 #include "./utils.hpp"
+#include "../wasm-morpho/src/morphology.hpp"
 
 
 
@@ -165,6 +166,14 @@ bool contains_other_nonzero(const Eigen::Tensor<T,D,R>& x, T i) {
 }
 
 
+/** Sort RLE-encoded connected components in ascending order by size  */
+ListOfRLEComponents sort_rle_components_by_size_ascending(ListOfRLEComponents x){
+    std::ranges::sort(x, std::less{}, &rle_component_size);
+    return x;
+}
+
+
+
 struct MaskAndCC {
     EigenBinaryMap mask;
     ListOfIndices2D objects;
@@ -173,7 +182,7 @@ struct MaskAndCC {
 /** Scale connected components objects, create masks and make sure they are 
     delineated (do not touch each other). */
 MaskAndCC scale_objects_and_create_mask(
-    const ListOfIndices2D& objects,
+    const ListOfRLEComponents& objects,
     const ImageSize& from_size,
     const ImageSize& to_size
 ) {
@@ -181,7 +190,7 @@ MaskAndCC scale_objects_and_create_mask(
     const ImageShape to_shape   = {to_size.height,   to_size.width};
 
     // iterate starting with smallest objects to avoid them getting swallowed
-    const auto sorted_objects = std::views::reverse( sort_by_length(objects) );
+    const auto sorted_objects = sort_rle_components_by_size_ascending(objects);
 
     EigenBinaryMap mask(to_size.height, to_size.width);
     EigenIntMap instancemap(to_size.height, to_size.width);
@@ -191,7 +200,8 @@ MaskAndCC scale_objects_and_create_mask(
     ListOfIndices2D output_objects;
     for(int object_idx = 0; object_idx < sorted_objects.size(); object_idx++) {
         const int object_label = object_idx + 1;
-        const Indices2D& object = sorted_objects[object_idx];
+        const Indices2D& object = 
+            rle_component_to_dense(sorted_objects[object_idx]);
         const Points points = indices_to_points(object, /*center_pixel=*/true);
         const Points scaled = scale_points(points, from_shape, to_shape);
 
@@ -257,7 +267,7 @@ load_binary_png_connected_components_and_resize(
         }
     );
     if(rc)
-        return std::unexpected("Loading png failed");
+        return std::unexpected("Loading png failed: " + std::to_string(rc));
     if(!all_ok)
         return std::unexpected("Connected components failed");
 
@@ -266,11 +276,28 @@ load_binary_png_connected_components_and_resize(
 }
 
 
+// not used anymore, remove
 ListOfIndices2D ccresult_to_indices(CCResult& result) {
     ListOfIndices2D output;
     for(DFS_Result& dfs: result.dfs_results)
         output.push_back(std::move(dfs.visited));
     return output;
+}
+
+std::expected<Buffer_p, std::string> 
+rasterize_cells_indices_and_encode_as_png(
+    const ListOfIndices2D& cell_ixs, 
+    const ImageSize& worksize, 
+    const ImageSize& og_size
+){
+    const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
+    const ListOfRLEComponents cells_rle_scaled = scale_rle_components(
+        cells_rle,
+        worksize,
+        og_size
+    );
+    
+    return rasterize_rle_and_encode_as_png_streaming(cells_rle_scaled, og_size);
 }
 
 
@@ -285,12 +312,17 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
 ) {
     // if not png: error?
 
+    const ImageSize worksize = 
+        {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first};
+    const ImageSize og_size = 
+        {.width = (uint32_t)og_shape.second, .height = (uint32_t)og_shape.first};
+
     // non-const for std::move
     auto expect_mask_and_cc = load_binary_png_connected_components_and_resize(
         filesize,
         read_file_callback_p,
         read_file_handle,
-        {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first}
+        worksize
     );
     if(!expect_mask_and_cc)
         return std::unexpected(expect_mask_and_cc.error());
@@ -336,6 +368,13 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
             return std::unexpected("Failed to resize to og shape and compress");
         cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
     } //else dont resize here, takes too long
+
+    // NOTE: temporarily creating og-sized map anyway
+    const std::expected<Buffer_p, std::string> expect_cellmap_og_shape_png = 
+        rasterize_cells_indices_and_encode_as_png(cell_ixs, worksize, og_size);
+    if(!expect_cellmap_og_shape_png)
+        return std::unexpected(expect_cellmap_og_shape_png.error());
+    cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
     
     return CellsPostprocessingResult{
         /*cellmap_workshape_png     = */ cellmap_workshape_png,

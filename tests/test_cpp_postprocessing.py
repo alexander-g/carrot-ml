@@ -390,3 +390,75 @@ def test_postprocessing_combined():
     
 
 
+
+def test_rle_scaling():
+    rle = [
+        np.array([
+            (4, 1, 10),
+            (5, 2, 8),
+            (6, 2, 9),
+            (6, 20, 5),
+            (7, 2, 9),
+            (7, 20, 7),
+            (8, 3, 30)
+        ]),
+        np.array([
+            (14, 1, 10),
+            (15, 2, 8),
+            (16, 2, 9),
+            (16, 20, 5),
+            (17, 2, 9),
+            (17, 20, 7),
+            (18, 2, 30)
+        ]),
+    ]
+
+    fromshape = (40,44)
+    toshape   = (144, 147)
+    
+    output = postp.scale_rle_components(rle, fromshape, toshape)
+
+    # make sure rows are sorted
+    for component in output:
+        rows = [row for row, _, _ in component.astype(int)]
+        assert (np.diff(rows) >= 0).all()
+    
+
+    scale_x = fromshape[1] / toshape[1]
+    scale_y = fromshape[0] / toshape[0]
+    for component_out, component_og in zip(output, rle):
+        component_out_px0 = []
+        component_out_px1 = []
+        component_og_px0  = []
+        component_og_px1  = []
+
+        for run_og in component_og:
+            p0_og  = np.array([run_og[0], run_og[1]])
+            p1_og  = np.array([run_og[0], run_og[1]+run_og[2]-1])
+
+            component_og_px0.append( tuple(p0_og.tolist()) )
+            component_og_px1.append( tuple(p1_og.tolist()) )
+
+
+        for run_out in component_out:
+            p0_out = np.array([run_out[0], run_out[1]])
+            p1_out = np.array([run_out[0], run_out[1]+run_out[2]-1])
+            
+
+            p0_out_rescaled = tuple(((p0_out + 0.5) * (scale_y, scale_x)).astype(int).tolist())
+            p1_out_rescaled = tuple(((p1_out + 0.5) * (scale_y, scale_x)).astype(int).tolist())
+
+
+
+            if p0_out_rescaled not in component_out_px0:
+                component_out_px0.append(p0_out_rescaled)
+            if p1_out_rescaled not in component_out_px1:
+                component_out_px1.append(p1_out_rescaled)
+
+        #breakpoint()
+        assert np.allclose( component_out_px0, component_og_px0 )
+        assert np.allclose( component_out_px1, component_og_px1 )
+
+
+
+

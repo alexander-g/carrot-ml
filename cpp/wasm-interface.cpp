@@ -156,6 +156,18 @@ int postprocess_combined_wasm(
             (void*)instancemap_workshape_png_pp, 
             [x = std::move(instanacemap_png)]() mutable { /* no-op */ } 
         );
+
+
+        const auto& expect_cellmap_og_png = output_cells.cellmap_og_shape_png;
+        if(expect_cellmap_og_png){
+            const Buffer_p& cellmap_og_png = expect_cellmap_og_png.value();
+            *cellmap_og_shape_png_pp     = cellmap_og_png->data;
+            *cellmap_og_shape_png_size_p = cellmap_og_png->size;
+            wasm_output_storage.emplace(
+                (void*)cellmap_og_shape_png_pp, 
+                [x = std::move(cellmap_og_png)]() mutable { /* no-op */ } 
+            );
+        }
     }
 
     

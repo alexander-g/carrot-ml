@@ -135,3 +135,136 @@ std::expected<EigenBinaryMap, int> load_and_resize_binary_png2(
     return output;
 }
 
+
+
+/** Scale connected components in RLE format from one image size to another.
+    If `to_size` is larger than `from_size`, then the result is reversible via
+    `(y + 0.5) / (to_size.height / from_size.height)`. */
+ListOfRLEComponents scale_rle_components(
+    const ListOfRLEComponents& rle_components, 
+    const ImageSize& from_size, 
+    const ImageSize& to_size
+) {
+    const double scale_x = to_size.width  / (double)from_size.width;
+    const double scale_y = to_size.height / (double)from_size.height;
+
+    // pre-computing how the values would map from `to_size` back onto `from_size`
+    std::vector<uint32_t> x_axis, y_axis;
+    x_axis.reserve(to_size.width);
+    y_axis.reserve(to_size.height);
+    for(int x = 0; x < to_size.width; ++x) {
+        uint32_t v = (uint32_t)((x + 0.5) / scale_x);
+        if(v >= (uint32_t)from_size.width)
+            v = (uint32_t)from_size.width - 1;
+        x_axis.push_back(v);
+    }
+    for(int y = 0; y < to_size.height; ++y) {
+        uint32_t v = (uint32_t)((y + 0.5) / scale_y);
+        if(v >= (uint32_t)from_size.height)
+            v = (uint32_t)from_size.height - 1;
+        y_axis.push_back(v);
+    }
+
+    const auto y_axis_it0 = y_axis.begin();
+    const auto y_axis_it1 = y_axis.end();
+    const auto x_axis_it0 = x_axis.begin();
+    const auto x_axis_it1 = x_axis.end();
+
+
+    ListOfRLEComponents output;
+    for(const RLEComponent& component: rle_components) {
+        RLEComponent output_component;
+
+        for(const RLERun& run: component) {
+            const uint32_t run_y  = run.row;
+            const uint32_t run_x0 = run.start;
+            const uint32_t run_x1 = run_x0 + run.len -1;
+
+            const auto to_y0 = std::lower_bound(y_axis_it0, y_axis_it1, run_y);
+            if(to_y0 == y_axis_it1 || *to_y0 != run_y )
+                // no value would map from `to_size` back to `from_size`
+                continue;
+            
+            const auto to_x0 = std::lower_bound(x_axis_it0, x_axis_it1, run_x0);
+            if(to_x0 == x_axis_it1)
+                // completely out of bounds
+                continue;
+            
+            // exclusive:
+            const auto to_x1 = std::upper_bound(x_axis_it0, x_axis_it1, run_x1);
+            if(to_x0 == to_x1)
+                continue;
+            const auto to_y1 = std::upper_bound(y_axis_it0, y_axis_it1, run_y);
+
+            for(auto it = to_y0; it < to_y1; it++)
+                output_component.push_back( RLERun{
+                    .row   = (uint32_t) std::distance(y_axis_it0, it),
+                    .start = (uint32_t) std::distance(x_axis_it0, to_x0),
+                    .len   = (uint32_t) std::distance(to_x0, to_x1)
+                } );
+
+        }
+        // sort by rows
+        std::ranges::sort(output_component, std::less{}, &RLERun::row);
+        output.push_back(output_component);
+    }
+    return output;
+}
+
+
+std::vector< std::reference_wrapper<const RLERun> > flatten_rle_components(
+    const ListOfRLEComponents& components
+) {
+    std::vector< std::reference_wrapper<const RLERun> > output;
+    output.reserve(components.size() * 10); //estimate
+
+    for(const RLEComponent& component: components)
+        for(const RLERun& run: component)
+            output.push_back( std::cref(run) );
+    
+    // sort by rows
+    std::ranges::sort(output, std::less{}, &RLERun::row);
+    return output;
+}
+
+
+std::expected<Buffer_p, std::string> rasterize_rle_and_encode_as_png_streaming(
+    const ListOfRLEComponents& components, 
+    const ImageSize& size
+) {
+    StreamingPNGEncoder spng(size, /*as_binary = */true);
+
+    const auto all_runs = flatten_rle_components(components);
+    auto run_it = all_runs.begin();
+    for(int y = 0; y < size.height; y++) {
+        EigenRGBAMap image_row( 1, size.width, 1 );
+        image_row.setZero();
+
+        while(run_it != all_runs.end() && run_it->get().row == y) {
+            const uint32_t x0 = run_it->get().start;
+            const uint32_t n  = run_it->get().len;
+            if(x0 >= size.width)
+                return std::unexpected(
+                    "Start of RLE run exceeds image width: " 
+                    + std::to_string(x0) + " vs " + std::to_string(size.width)
+                );
+            if(x0 + n > size.width)
+                return std::unexpected(
+                    "End of RLE run exceeds image width: "
+                    + std::to_string(x0 + n) + " vs " + std::to_string(size.width)
+                );
+
+            std::memset(image_row.data() + x0, 255, n);
+            
+            run_it++;
+        }
+
+        const auto expect_ok = spng.push_image_data(image_row);
+        if(!expect_ok)
+            return std::unexpected(expect_ok.error());
+    }
+    // TODO: check if there are runs remaining beyond image height
+
+    return spng.finalize();
+}
+

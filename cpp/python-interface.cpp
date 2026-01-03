@@ -10,9 +10,11 @@
 #include "./wasm-morpho/src/pybind-utils.hpp"
 #include "./wasm-morpho/src/morphology.hpp"
 #include "./wasm-big-image/src/util.hpp"
-#include "./src/pybind-utils.hpp"
+
+#include "./src/image-utils.hpp"
 #include "./src/postprocessing.hpp"
 #include "./src/postprocessing_cells.hpp"
+#include "./src/pybind-utils.hpp"
 
 
 namespace py = pybind11;
@@ -66,6 +68,29 @@ py_bool_array points_in_polygon_py(
 
     std::vector<bool> insides = points_in_polygon(points, polygon);
     return bool_stdvec_to_numpy(insides);
+}
+
+py::list scale_rle_components_py(
+    const py::list& rle_components_py, 
+    const ImageShape&  from_shape, 
+    const ImageShape&  to_shape
+) {
+    const ListOfRLEComponents rle_components = 
+        py_list_to_rle_components(rle_components_py);
+    
+    const ListOfRLEComponents output = 
+        scale_rle_components(
+            rle_components, 
+            ImageSize{
+                .width  = (uint32_t)from_shape.second, 
+                .height = (uint32_t)from_shape.first
+            },
+            ImageSize{
+                .width  = (uint32_t)to_shape.second,   
+                .height = (uint32_t)to_shape.first
+            }
+        );
+    return rle_components_to_py_list(output);
 }
 
 
@@ -154,7 +179,10 @@ py::dict postprocess_combined_from_files_py(
         og_shape
     );
     if(!expect_output_cells)
-        throw std::runtime_error("Cells postprocessing failed");
+        throw std::runtime_error(
+            "Cells postprocessing failed: " 
+            + expect_output_cells.error() 
+        );
     const CellsPostprocessingResult& output_cells = *expect_output_cells;
 
     const auto expect_output_rings = postprocess_treeringmapfile(
@@ -234,6 +262,14 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         points_in_polygon_py,
         py::arg("p"),
         py::arg("polygon")
+    );
+
+    m.def(
+        "scale_rle_components",
+        scale_rle_components_py,
+        py::arg("rle_components").noconvert(),
+        py::arg("from_shape"),
+        py::arg("to_shape")
     );
 
     m.def(
