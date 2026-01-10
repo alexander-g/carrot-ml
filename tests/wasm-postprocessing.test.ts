@@ -131,25 +131,20 @@ Deno.test('cellmapfile5', async () => {
     const cellmapfile1 = new File([Deno.readFileSync(filepath1)], 'cellmap.png')
 
     const output1 = await module.postprocess_combined(cellmapfile1, null, worksize, og_size)
-    console.log(output1)
+    //console.log(output1)
     asserts.assertNotInstanceOf(output1, Error)
     asserts.assert(output1._type == 'cells')
-    asserts.assertExists(output1.cellmap_og_shape_png)
 
-    //Deno.writeFileSync("DEBUG/DELETE.worksize.png", await output1.cellmap_workshape_png.bytes())
+    const post_rasterized:Error|File = 
+        await module.rasterize_cell_indices_and_encode_as_png(output1.cells_serialized, og_size)
+    asserts.assertNotInstanceOf(post_rasterized, Error)
 
-    // const resize_output = await module.resize_mask(output1.cellmap_workshape_png, worksize, og_size)
-    // asserts.assertNotInstanceOf(resize_output, Error)
-
-    // Deno.writeFileSync("DEBUG/DELETE.resized.png", await resize_output.bytes())
 
     // re-postprocess
-    const output2 = await module.postprocess_combined(output1.cellmap_og_shape_png, null, worksize, og_size)
-    console.log(output2)
+    const output2 = await module.postprocess_combined(post_rasterized, null, worksize, og_size)
     asserts.assertNotInstanceOf(output2, Error)
     asserts.assert(output2._type == 'cells')
 
-    //Deno.writeFileSync("DEBUG/DELETE.worksize2.png", await output2.cellmap_workshape_png.bytes())
 
     // both masks should be the same, quick test
     asserts.assertEquals(output1.cellmap_workshape_png.size, output2.cellmap_workshape_png.size)

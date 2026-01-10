@@ -17,8 +17,11 @@ struct CellsPostprocessingResult {
     /** PNG image with cells individually colored */
     Buffer_p instancemap_workshape_png;
 
-    /** Cell points as detected by connected components */
+    /** Detected cell points in workshape */
     std::vector<Indices2D> cells;
+
+    /** Detected cell points in og shape and in RLE format*/
+    ListOfRLEComponents cells_rle_og_shape;
 };
 
 
@@ -59,3 +62,12 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     const ImageShape&  workshape,
     const ImageShape&  og_shape
 );
+
+
+/** Rasterize cells, resize to target size and encode as binary mask PNG. */
+std::expected<Buffer_p, std::string> rasterize_cell_indices_and_encode_as_png(
+    const ListOfIndices2D& cell_ixs, 
+    const ImageSize& source_size, 
+    const ImageSize& target_size
+);
+

@@ -212,15 +212,13 @@ ListOfRLEComponents scale_rle_components(
 }
 
 
-std::vector< std::reference_wrapper<const RLERun> > flatten_rle_components(
-    const ListOfRLEComponents& components
-) {
-    std::vector< std::reference_wrapper<const RLERun> > output;
+std::vector<RLERun> flatten_rle_components(const ListOfRLEComponents& components){
+    std::vector<RLERun> output;
     output.reserve(components.size() * 10); //estimate
 
     for(const RLEComponent& component: components)
         for(const RLERun& run: component)
-            output.push_back( std::cref(run) );
+            output.push_back( run );
     
     // sort by rows
     std::ranges::sort(output, std::less{}, &RLERun::row);
@@ -229,20 +227,19 @@ std::vector< std::reference_wrapper<const RLERun> > flatten_rle_components(
 
 
 std::expected<Buffer_p, std::string> rasterize_rle_and_encode_as_png_streaming(
-    const ListOfRLEComponents& components, 
+    const std::vector<RLERun>& rle_runs,
     const ImageSize& size
 ) {
     StreamingPNGEncoder spng(size, /*as_binary = */true);
 
-    const auto all_runs = flatten_rle_components(components);
-    auto run_it = all_runs.begin();
+    EigenRGBAMap image_row( 1, size.width, 1 );
+    auto run_it = rle_runs.begin();
     for(int y = 0; y < size.height; y++) {
-        EigenRGBAMap image_row( 1, size.width, 1 );
         image_row.setZero();
 
-        while(run_it != all_runs.end() && run_it->get().row == y) {
-            const uint32_t x0 = run_it->get().start;
-            const uint32_t n  = run_it->get().len;
+        while(run_it != rle_runs.end() && run_it->row == y) {
+            const uint32_t x0 = run_it->start;
+            const uint32_t n  = run_it->len;
             if(x0 >= size.width)
                 return std::unexpected(
                     "Start of RLE run exceeds image width: " 

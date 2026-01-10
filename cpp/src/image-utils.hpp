@@ -50,6 +50,11 @@ ListOfRLEComponents scale_rle_components(
 );
 
 std::expected<Buffer_p, std::string> rasterize_rle_and_encode_as_png_streaming(
-    const ListOfRLEComponents& components, 
+    const std::vector<RLERun>& rle_runs,
     const ImageSize& size
 );
+
+
+/** Nested std::vector to flat std::vector */
+std::vector<RLERun> flatten_rle_components(const ListOfRLEComponents& components);
+

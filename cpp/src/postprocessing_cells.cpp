@@ -284,20 +284,18 @@ ListOfIndices2D ccresult_to_indices(CCResult& result) {
     return output;
 }
 
-std::expected<Buffer_p, std::string> 
-rasterize_cells_indices_and_encode_as_png(
+
+/** Rasterize cells, resize to target size and encode as binary mask PNG. */
+std::expected<Buffer_p, std::string> rasterize_cell_indices_and_encode_as_png(
     const ListOfIndices2D& cell_ixs, 
-    const ImageSize& worksize, 
-    const ImageSize& og_size
+    const ImageSize& source_size, 
+    const ImageSize& target_size
 ){
     const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
-    const ListOfRLEComponents cells_rle_scaled = scale_rle_components(
-        cells_rle,
-        worksize,
-        og_size
-    );
-    
-    return rasterize_rle_and_encode_as_png_streaming(cells_rle_scaled, og_size);
+    const ListOfRLEComponents cells_rle_scaled = 
+        scale_rle_components(cells_rle, source_size, target_size);
+    const std::vector<RLERun> flat_rle = flatten_rle_components(cells_rle_scaled);
+    return rasterize_rle_and_encode_as_png_streaming(flat_rle, target_size);
 }
 
 
@@ -359,28 +357,25 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     if(workshape == og_shape)
         cellmap_og_shape_png = cellmap_workshape_png;
     else if(!do_not_resize_to_og_shape) {
-        const std::expected<Buffer_p, int> expect_cellmap_og_shape_png = 
-            resize_image_and_encode_as_png(
-                binary_to_rgba(mask),
-                {.width=(uint32_t)og_shape.second, .height=(uint32_t)og_shape.first}
-            );
+        const std::expected<Buffer_p, std::string> expect_cellmap_og_shape_png = 
+            rasterize_cell_indices_and_encode_as_png(cell_ixs, worksize, og_size);
         if(!expect_cellmap_og_shape_png)
-            return std::unexpected("Failed to resize to og shape and compress");
+            return std::unexpected(expect_cellmap_og_shape_png.error());
         cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
     } //else dont resize here, takes too long
 
-    // NOTE: temporarily creating og-sized map anyway
-    const std::expected<Buffer_p, std::string> expect_cellmap_og_shape_png = 
-        rasterize_cells_indices_and_encode_as_png(cell_ixs, worksize, og_size);
-    if(!expect_cellmap_og_shape_png)
-        return std::unexpected(expect_cellmap_og_shape_png.error());
-    cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
+    // do resize the cell indices (as RLE to save memory)
+    const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
+    const ListOfRLEComponents cells_rle_scaled = 
+        scale_rle_components(cells_rle, worksize, og_size);
+
     
     return CellsPostprocessingResult{
         /*cellmap_workshape_png     = */ cellmap_workshape_png,
         /*cellmap_og_shape_png      = */ cellmap_og_shape_png,
         /*instancemap_workshape_png = */ instancemap_workshape_png_x.value(),
-        /*cells                     = */ std::move(cell_ixs)
+        /*cells                     = */ std::move(cell_ixs),
+        /*cells_rle_og_shape        = */ std::move(cells_rle_scaled)
     };
 }
 

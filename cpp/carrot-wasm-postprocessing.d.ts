@@ -25,10 +25,14 @@ export type CellsPostprocessingResult = {
     cellmap_workshape_png: File;
 
     /** Binary map with cells of the size of original input image, as PNG */
-    cellmap_og_shape_png: File|null;
+    cellmap_og_shape_png: File|null;  // TODO: make this a Promise<File> ?
 
     /** Map with cells colored individually, as PNG */
     instancemap_workshape_png: File;
+
+    /** Binary representation of detected cells. 
+     *  Meant to be forwarded to `rasterize_cell_indices_and_encode_as_png`*/
+    cells_serialized: ArrayBuffer;
 
     /** For internal type checking to differentiate from other result types */
     _type: "cells";
@@ -80,6 +84,13 @@ export declare class CARROT_Postprocessing {
         mask:      File, 
         work_size: ImageSize, 
         og_size:   ImageSize
+    ): Promise<File|Error>;
+
+    /** Rasterize cells and encode as binary mask PNG (no resizing).
+     *  `cells_serialized` should be from `CellsPostprocessingResult` */
+    rasterize_cell_indices_and_encode_as_png(
+        cells_serialized: ArrayBuffer,
+        size: ImageSize,
     ): Promise<File|Error>;
 }
 
