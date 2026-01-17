@@ -896,13 +896,105 @@ Paths segmentation_to_paths(
 }
 
 
+std::optional<BoxXYWH> bounding_box_of_indices(const Indices2D& indices) {
+    if(indices.empty())
+        return std::nullopt;
+
+    int32_t y0 = 0x0fffffff, x0 = 0x0fffffff, y1 = 0, x1 = 0;
+    for(const Index2D& index: indices) {
+        if(y0 > index.i)
+            y0 = index.i;
+        
+        if(x0 > index.j)
+            x0 = index.j;
+
+        if(y1 < index.i)
+            y1 = index.i;
+
+        if(x1 < index.j)
+            x1 = index.j;
+    }
+    return BoxXYWH{
+        .x = x0, 
+        .y = y0, 
+        .w = (uint32_t)x1 - x0 + 1, 
+        .h = (uint32_t)y1 - y0 + 1
+    };
+}
+
+Indices2D add_offset_to_indices(
+    const Indices2D& indices, 
+    const Index2D offset
+) {
+    Indices2D output;
+    output.reserve(indices.size());
+    for(const Index2D& index: indices)
+        output.push_back(Index2D{
+            .i = (Eigen::Index)((int)index.i + (int)offset.i), 
+            .j = (Eigen::Index)((int)index.j + (int)offset.j), 
+        });
+    return output;
+}
+
+
+struct RasterizedComponent {
+    EigenBinaryMap mask;
+    Index2D offset;
+};
+
+std::optional<RasterizedComponent> rasterize_indices(const Indices2D& indices) {
+    const auto expect_bbox = bounding_box_of_indices(indices);
+    if(!expect_bbox)
+        return std::nullopt;
+    const BoxXYWH& bbox = expect_bbox.value();
+
+    EigenBinaryMap mask(bbox.h, bbox.w);
+    mask.setZero();
+    for(const Index2D& index: indices)
+        mask(index.i - bbox.y, index.j - bbox.x) = 1;
+
+    return RasterizedComponent{mask, {bbox.y, bbox.x}};
+}
+
+Paths connected_components_to_paths(const ListOfIndices2D& list_of_cc_indices) {
+    std::vector<Indices2D> paths;
+
+    for(const Indices2D& cc_indices: list_of_cc_indices) {
+        const auto expect_rasterized = rasterize_indices(cc_indices);
+        if(!expect_rasterized)
+            continue;
+        const EigenBinaryMap& mask = expect_rasterized->mask;
+
+        const EigenBinaryMap skeleton_mask = skeletonize(mask);
+        const CCResult ccresult = connected_components(skeleton_mask);
+
+        // should be a single iteration
+        for(const auto& dfs: ccresult.dfs_results){
+            const auto path = longest_path_from_dfs_result(dfs);
+            if(path && path->size() > 1)
+                paths.push_back( 
+                    add_offset_to_indices(
+                        gather_path_coordinates(*path, dfs.visited),
+                        expect_rasterized->offset
+                    )
+                );
+        }
+    }
+    
+    const std::vector<Indices2D> reoriented_paths = reorient_paths(paths);
+    return indices_to_points(reoriented_paths);
+}
 
 
 
 
 
 
-std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
+
+
+
+std::expected<TreeringsPostprocessingResult, std::string> 
+postprocess_treeringmapfile(
     size_t      filesize,
     const void* read_file_callback_p,
     const void* read_file_handle,
@@ -914,19 +1006,19 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
 ) {
     // if not png: error?
 
-    const auto mask_x = load_and_resize_binary_png2(
-        filesize, 
-        read_file_callback_p, 
+    // non-const for std::move
+    auto expect_mask_and_cc = load_binary_png_connected_components_and_resize(
+        filesize,
+        read_file_callback_p,
         read_file_handle,
-        workshape.second,  // width
-        workshape.first    // height
+        {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first}
     );
-    if(!mask_x)
-        return std::nullopt;
+    if(!expect_mask_and_cc)
+        return std::unexpected(expect_mask_and_cc.error());
+    const EigenBinaryMap& mask = expect_mask_and_cc->mask;
+    const ListOfIndices2D& objectpixels = expect_mask_and_cc->objects;
     
-    const EigenBinaryMap& mask = mask_x.value();
-
-    const Paths simple_paths = segmentation_to_paths(mask, 0.0);
+    const Paths simple_paths = connected_components_to_paths(objectpixels);
           Paths merged_paths = merge_paths(simple_paths, workshape);
 
     if(og_shape != workshape)
@@ -955,7 +1047,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
             /*channels=*/ 1
         );
     if(!expect_treeringmap_workshape_png)
-        return std::nullopt;
+        return std::unexpected("PNG compression (workshape) failed");
     const Buffer_p treeringmap_workshape_png = *expect_treeringmap_workshape_png;
 
     std::optional<Buffer_p> treeringmap_og_shape_png = std::nullopt;
@@ -968,7 +1060,7 @@ std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
                 {.width=(uint32_t)og_shape.second, .height=(uint32_t)og_shape.first}
             );
         if(!expect_treeringmap_og_shape_png)
-            return std::nullopt;
+            return std::unexpected("PNG compression (og shape) failed");
         treeringmap_og_shape_png = expect_treeringmap_og_shape_png.value();
     } //else dont resize here, takes too long
 

@@ -14,13 +14,20 @@ std::expected<EigenBinaryMap, int> load_and_resize_binary_png(
     const int   dst_height
 );
 
-/** Temporary workaround for poor results with nearest neighbor interpolation */
-std::expected<EigenBinaryMap, int> load_and_resize_binary_png2(
+
+struct MaskAndCC {
+    EigenBinaryMap mask;
+    ListOfIndices2D objects;
+};
+
+/** Load a binary png, perform streaming connected components on the original 
+    sized image and then resize them to a target size.  */
+std::expected<MaskAndCC, std::string> 
+load_binary_png_connected_components_and_resize(
     size_t      filesize,
     const void* read_file_callback_p,
     const void* read_file_handle,
-    const int   dst_width,
-    const int   dst_height
+    const ImageSize target_size
 );
 
 

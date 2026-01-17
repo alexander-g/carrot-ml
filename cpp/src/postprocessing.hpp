@@ -1,6 +1,7 @@
 #ifndef POSTPROCESSING_HPP
 #define POSTPROCESSING_HPP
 
+#include <expected>
 #include <optional>
 #include <vector>
 
@@ -45,7 +46,8 @@ struct TreeringsPostprocessingResult {
 
 };
 
-std::optional<TreeringsPostprocessingResult> postprocess_treeringmapfile(
+std::expected<TreeringsPostprocessingResult, std::string> 
+postprocess_treeringmapfile(
     size_t      filesize,
     const void* read_file_callback_p,
     const void* read_file_handle,

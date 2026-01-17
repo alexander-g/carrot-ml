@@ -71,7 +71,7 @@ def test_segmentation_to_paths():
 
 
 
-def test_postprocess_treeringmapfile():
+def test_postprocess_treeringmapfile1():
     mask = np.zeros([1000,1000], dtype=bool)
     mask[10:-10, 100:110] = 1
     mask[50:-50, 200:250] = 1
@@ -390,7 +390,7 @@ def test_postprocessing_combined():
     
 
 
-
+# scale RLE components, making sure they map back
 def test_rle_scaling():
     rle = [
         np.array([
@@ -460,5 +460,57 @@ def test_rle_scaling():
         assert np.allclose( component_out_px1, component_og_px1 )
 
 
+
+# bug: downscale components, after rasterization they should be still connected
+def test_rle_scaling2():
+    rle = [
+        np.array([
+            (4, 1, 5),  # x0=1 / x1=5
+            (5, 6, 3),  # x0=6 / x1=8
+            (6, 9, 4),  # x0=9 / x1=12
+            (7, 13, 5),  # x0=13 / x1=17
+            (8, 18, 5),  # x0=18 / x1=22
+        ]),
+    ]
+
+    fromshape = (50, 55)
+    toshape   = (20, 22)
+    
+    scaled_rle = postp.scale_rle_components(rle, fromshape, toshape)
+    print(scaled_rle)
+
+    #rasterize
+    X = np.zeros( toshape, dtype='bool' ) 
+    assert len(scaled_rle) == 1
+    for rlerun in scaled_rle[0]:
+        for i in range(rlerun[2]):
+            X[rlerun[0], rlerun[1]+i] = 1
+    
+    _, n_components = scipy.ndimage.label(X, structure=np.ones([3,3]))
+    assert n_components == 1
+
+    # make sure coalesced / no duplicate rows
+    rows = [run[0] for run in scaled_rle[0]]
+    assert len(rows) == len(set(rows))
+
+    # bug2: asymmetric u-shape, 2nd arm of the u disappears because too thin
+    rle2 = [
+        np.array([
+            (4,1,1),
+            (5,1,1),
+            (6,1,1),
+            (7,1,1),
+            (8,1,1),
+            (9,1,10),
+            (8,9,1),
+            (7,9,1),
+            (6,9,1),
+        ])
+    ]
+    scaled_rle2 = postp.scale_rle_components(rle2, fromshape, toshape)
+
+    rows2 = [run[0] for run in scaled_rle2[0]]
+    _, rows2_counts = np.unique(rows2, return_counts=True)
+    assert rows2_counts.max() > 1
 
 
