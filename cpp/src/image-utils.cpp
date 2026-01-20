@@ -234,88 +234,74 @@ load_binary_png_connected_components_and_resize(
 
 
 /** Scale connected components in RLE format from one image size to another.
-    If `to_size` is larger than `from_size`, then the result is reversible via
-    `(y + 0.5) / (to_size.height / from_size.height)`. */
+    If `to_size` is larger than `from_size`, then the result is reversible. */
 ListOfRLEComponents scale_rle_components(
     const ListOfRLEComponents& rle_components, 
     const ImageSize& from_size, 
     const ImageSize& to_size
 ) {
+    // TODO: if(to_size.width == 0 || to_size.height == 0)
+    // TODO: if(from_size.width == 0 || from_size.height == 0)
+
     const double scale_x = to_size.width  / (double)from_size.width;
     const double scale_y = to_size.height / (double)from_size.height;
 
-    // pre-computing how the values would map from `to_size` back onto `from_size`
-    std::vector<uint32_t> x_axis, y_axis;
-    x_axis.reserve(to_size.width);
-    y_axis.reserve(to_size.height);
-    for(int x = 0; x < to_size.width; ++x) {
-        uint32_t v = (uint32_t)((x + 0.5) / scale_x);
-        if(v >= (uint32_t)from_size.width)
-            v = (uint32_t)from_size.width - 1;
-        x_axis.push_back(v);
-    }
-    for(int y = 0; y < to_size.height; ++y) {
-        uint32_t v = (uint32_t)((y + 0.5) / scale_y);
-        if(v >= (uint32_t)from_size.height)
-            v = (uint32_t)from_size.height - 1;
-        y_axis.push_back(v);
-    }
-
-    const auto y_axis_it0 = y_axis.begin();
-    const auto y_axis_it1 = y_axis.end();
-    const auto x_axis_it0 = x_axis.begin();
-    const auto x_axis_it1 = x_axis.end();
-
-
     ListOfRLEComponents output;
     for(RLEComponent component: rle_components) {
-        if(component.empty())
-            output.push_back({});
-
         coalesce_rle_runs(component);
-        RLEComponent output_component;
+        if(component.empty()) {
+            output.push_back({});
+            continue;
+        }
 
-        const RLERun& last_run = component.back();
-        const auto last_y = std::lower_bound(y_axis_it0, y_axis_it1, last_run.row);
+        RLEComponent output_component;
 
         //for(const RLERun& run: component) {
         for(int run_i = 0; run_i < component.size(); run_i++) {
             const RLERun& run = component[run_i];
 
             if(run.len < 1)
+                //should not happen after coalesce above
                 continue;
 
             const uint32_t run_y  = run.row;
             const uint32_t run_x0 = run.start;
-            const uint32_t run_x1 = run_x0 + run.len -1;
+            const uint32_t run_x1 = run_x0 + run.len -1;  // inclusive / last x
 
-            const auto to_y0 = std::lower_bound(y_axis_it0, y_axis_it1, run_y);
-            if(to_y0 == y_axis_it1)
-                // out of bounds
-                continue;
-            if(to_y0 > last_y)
-                // beyond last row in component
-                continue;
-            
-            const auto to_x0 = std::lower_bound(x_axis_it0, x_axis_it1, run_x0);
-            if(to_x0 == x_axis_it1)
-                // out of bounds
-                continue;
-            
-            // exclusive:
-            const auto to_x1 = std::upper_bound(x_axis_it0, x_axis_it1, run_x1);
-            const auto to_y1 = std::upper_bound(y_axis_it0, y_axis_it1, run_y);
+
+            const bool upscale_y = (scale_y > 1);
+            const bool upscale_x = (scale_x > 1);
+
+            //const auto round_fn_y0 = upscale_y? std::ceil : std::floor;
+            //const auto round_fn_x0 = upscale_x? std::ceil : std::floor;
+            const auto round_fn_y0 = upscale_y
+                ? [](double v){ return std::ceil(v); }
+                : [](double v){ return std::floor(v); };
+            const auto round_fn_x0 = upscale_x
+                ? [](double v){ return std::ceil(v); }
+                : [](double v){ return std::floor(v); };
+
+            const uint32_t y0_dst = round_fn_y0( run_y * scale_y );
+            const uint32_t y1_dst = 
+                upscale_y
+                ? std::floor( (run_y + 0.999999999) * scale_y  )
+                : std::floor( run_y * scale_y );
+
+            const uint32_t x0_dst = round_fn_x0( run_x0 * scale_x );
+            const uint32_t x1_dst = 
+                upscale_x
+                ? std::floor( (run_x1 + 0.999999999) * scale_x )
+                : std::floor( run_x1 * scale_x );
+
 
             // loop at least once, to avoid missing runs
-            auto it = to_y0;
-            do {
+            for(uint32_t row_dst = y0_dst; row_dst < y1_dst+1; row_dst++) {
                 output_component.push_back( RLERun{
-                    .row   = (uint32_t) std::distance(y_axis_it0, it),
-                    .start = (uint32_t) std::distance(x_axis_it0, to_x0),
-                    .len   = (uint32_t) std::max(1, (int)std::distance(to_x0, to_x1))
+                    .row   = row_dst,
+                    .start = x0_dst,
+                    .len   = (uint32_t) (x1_dst + 1.0) - x0_dst
                 } );
-                it++;
-            } while(it < to_y1 && it < last_y);
+            }
         }
         // make sure there is only one run per row
         coalesce_rle_runs(output_component);

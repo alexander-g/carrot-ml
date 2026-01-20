@@ -262,6 +262,8 @@ def test_postprocess_cellmapfile_ensure_delineated():
     mask[100:-100, 51:133] = 1
     mask[300:-300, 134:162] = 1
     mask[300:-300, 163:164] = 1  # thin one (gets swallowed by previous)
+    #diagonal line, to make sure it stays the same
+    mask[ np.arange(100,190), np.arange(500,590) ] = 1
     
     tempdir = tempfile.TemporaryDirectory()
     maskf = os.path.join(tempdir.name, 'testmask.png')
@@ -275,8 +277,8 @@ def test_postprocess_cellmapfile_ensure_delineated():
         PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
     )
     counts1 = np.unique(instancemap1.reshape(-1,3), axis=0, return_counts=True)[1]
-    # 4 cells + background:
-    assert len( counts1 ) == 5
+    # 5 objects + background:
+    assert len( counts1 ) == 6
 
 
     # re-postprocess on the output mask
@@ -290,7 +292,7 @@ def test_postprocess_cellmapfile_ensure_delineated():
     )
     counts2 = np.unique(instancemap2.reshape(-1,3), axis=0, return_counts=True)[1]
     # should be still 4 + 1
-    assert len( counts2 ) == 5
+    assert len( counts2 ) == len(counts1)
 
     # sizes should be unchanged
     assert sorted(counts1.tolist()) == sorted(counts2.tolist())
@@ -416,48 +418,18 @@ def test_rle_scaling():
     fromshape = (40,44)
     toshape   = (144, 147)
     
-    output = postp.scale_rle_components(rle, fromshape, toshape)
+    output1 = postp.scale_rle_components(rle, fromshape, toshape)
 
     # make sure rows are sorted
-    for component in output:
+    for component in output1:
         rows = [row for row, _, _ in component.astype(int)]
         assert (np.diff(rows) >= 0).all()
-    
 
-    scale_x = fromshape[1] / toshape[1]
-    scale_y = fromshape[0] / toshape[0]
-    for component_out, component_og in zip(output, rle):
-        component_out_px0 = []
-        component_out_px1 = []
-        component_og_px0  = []
-        component_og_px1  = []
+    output2 = postp.scale_rle_components(output1, toshape, fromshape)
 
-        for run_og in component_og:
-            p0_og  = np.array([run_og[0], run_og[1]])
-            p1_og  = np.array([run_og[0], run_og[1]+run_og[2]-1])
-
-            component_og_px0.append( tuple(p0_og.tolist()) )
-            component_og_px1.append( tuple(p1_og.tolist()) )
-
-
-        for run_out in component_out:
-            p0_out = np.array([run_out[0], run_out[1]])
-            p1_out = np.array([run_out[0], run_out[1]+run_out[2]-1])
-            
-
-            p0_out_rescaled = tuple(((p0_out + 0.5) * (scale_y, scale_x)).astype(int).tolist())
-            p1_out_rescaled = tuple(((p1_out + 0.5) * (scale_y, scale_x)).astype(int).tolist())
-
-
-
-            if p0_out_rescaled not in component_out_px0:
-                component_out_px0.append(p0_out_rescaled)
-            if p1_out_rescaled not in component_out_px1:
-                component_out_px1.append(p1_out_rescaled)
-
-        #breakpoint()
-        assert np.allclose( component_out_px0, component_og_px0 )
-        assert np.allclose( component_out_px1, component_og_px1 )
+    assert len(output2) == len(rle)
+    for out2_i, rle_i in zip(output2, rle):
+        np.allclose(out2_i, rle_i)
 
 
 

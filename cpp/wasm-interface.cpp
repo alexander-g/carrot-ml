@@ -101,7 +101,8 @@ int postprocess_combined_wasm(
     }
 
 
-    std::optional<TreeringsPostprocessingResult> expect_output_rings = std::nullopt;
+    std::expected<TreeringsPostprocessingResult, std::string> expect_output_rings = 
+        std::unexpected("not initialized");
     if(have_treeringmap){ 
         expect_output_rings = postprocess_treeringmapfile(
             treeringmap_filesize, 

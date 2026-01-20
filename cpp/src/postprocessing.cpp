@@ -132,7 +132,7 @@ std::optional<LineCoeffs> line_from_endpoint(
     if(!a0)
         return std::nullopt;
     
-    const auto a1 = furthest_point(nhood, a0.value());
+    const auto a1 = furthest_point(nhood, p);
     if(!a1)
         return std::nullopt;
     
