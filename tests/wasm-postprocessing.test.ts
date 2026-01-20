@@ -110,8 +110,43 @@ Deno.test('resize_mask', async () => {
     const treeringmapfile1 = new File([Deno.readFileSync(filepath1)], 'treerrings.png')
 
 
-    const worksize = {width:400, height:400}
+    //const worksize = {width:400, height:400}
+    const worksize = {width:3297, height:4379}
     const targetsize = {width:10001, height:10002}
     const encoded = await module.resize_mask(treeringmapfile1, worksize, targetsize)
     asserts.assertInstanceOf(encoded, File)
+
 })
+
+
+// bug: this file failed in wasm because of OOM
+// bug2: also resize_mask merges cells
+Deno.test('cellmapfile5', async () => {
+    const module = await initialize();
+
+    const worksize = {width: 10715, height: 1866}
+    const og_size = {width: 77762, height: 13544}
+    
+    const filepath1 = import.meta.resolve('./assets/cellmap5.png').replace('file://','')
+    const cellmapfile1 = new File([Deno.readFileSync(filepath1)], 'cellmap.png')
+
+    const output1 = await module.postprocess_combined(cellmapfile1, null, worksize, og_size)
+    //console.log(output1)
+    asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert(output1._type == 'cells')
+
+    const post_rasterized:Error|File = 
+        await module.rasterize_cell_indices_and_encode_as_png(output1.cells_serialized, og_size)
+    asserts.assertNotInstanceOf(post_rasterized, Error)
+
+
+    // re-postprocess
+    const output2 = await module.postprocess_combined(post_rasterized, null, worksize, og_size)
+    asserts.assertNotInstanceOf(output2, Error)
+    asserts.assert(output2._type == 'cells')
+
+
+    // both masks should be the same, quick test
+    asserts.assertEquals(output1.cellmap_workshape_png.size, output2.cellmap_workshape_png.size)
+})
+

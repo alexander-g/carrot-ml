@@ -43,6 +43,8 @@ type CARROT_Postprocessing_WASM = {
         cellmap_workshape_png_size:      pointer,
         cellmap_og_shape_png:            pointer,
         cellmap_og_shape_png_pp_size:    pointer,
+        cell_ixs_binary_workshape:         pointer,
+        cell_ixs_binary_workshape_pp_size: pointer,
         instancemap_workshape_png:       pointer,
         instancemap_workshape_png_size:  pointer,
         treeringmap_workshape_png:       pointer,
@@ -73,6 +75,18 @@ type CARROT_Postprocessing_WASM = {
         png_buffer_size_p: pointer,
         // returncode because of wasm issues, required
         returncode: pointer
+    ) => number,
+
+    _rasterize_cell_indices_and_encode_as_png: (
+        // previously returned by _postprocess_combined_wasm()
+        cells_serialized:      pointer,
+        cells_serialized_size: number,
+        // target size of the mask (no resizing)
+        width:   number,
+        height:  number,
+        // output
+        png_buffer_pp:     pointer,
+        png_buffer_size_p: pointer,
     ) => number,
 
     _free_output: (p:pointer) => void,
@@ -142,8 +156,10 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
         const cellmap_workshape_png_pp:pointer         = this.#malloc(8);
         const cellmap_workshape_png_size_p:pointer     = this.#malloc(8);
-        const cellmap_og_shape_png_pp:pointer         = this.#malloc(8);
-        const cellmap_og_shape_png_size_p:pointer     = this.#malloc(8);
+        const cellmap_og_shape_png_pp:pointer          = this.#malloc(8);
+        const cellmap_og_shape_png_size_p:pointer      = this.#malloc(8);
+        const cell_ixs_binary_workshape_pp:pointer     = this.#malloc(8);
+        const cell_ixs_binary_workshape_size_p:pointer = this.#malloc(8);
         const instancemap_workshape_png_pp:pointer     = this.#malloc(8);
         const instancemap_workshape_png_size_p:pointer = this.#malloc(8);
         const treeringmap_workshape_png_pp:pointer     = this.#malloc(8);
@@ -175,6 +191,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 cellmap_workshape_png_size_p,
                 cellmap_og_shape_png_pp,
                 cellmap_og_shape_png_size_p,
+                cell_ixs_binary_workshape_pp,
+                cell_ixs_binary_workshape_size_p,
                 instancemap_workshape_png_pp,
                 instancemap_workshape_png_size_p,
                 treeringmap_workshape_png_pp,
@@ -201,6 +219,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
             let cellmap_workshape:File|null = null;
             let cellmap_og_shape: File|null = null;
+            let cells_serialized:  ArrayBuffer|null = null
             let instancemap_workshape:File|null = null;
             if(cellmap) {
                 const cellmap_workshape_png_u8:Uint8Array<ArrayBuffer>|null = 
@@ -219,6 +238,11 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     )
                 if(cellmap_og_shape_u8 != null)
                     cellmap_og_shape = new File([cellmap_og_shape_u8], 'cellmap.png')
+
+                cells_serialized = this.#read_dynamic_output_buffer(
+                    cell_ixs_binary_workshape_pp,
+                    cell_ixs_binary_workshape_size_p
+                )?.buffer ?? null
 
                 const instancemap_workshape_png_u8:Uint8Array<ArrayBuffer>|null 
                     = this.#read_dynamic_output_buffer(
@@ -290,6 +314,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
             }
 
             if(cellmap_workshape 
+            && cells_serialized
             && instancemap_workshape 
             && treeringmap_workshape_shape_png 
             && paired_paths 
@@ -298,6 +323,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 return {
                     cellmap_workshape_png:     cellmap_workshape,
                     cellmap_og_shape_png:      cellmap_og_shape,
+                    cells_serialized:          cells_serialized,
                     instancemap_workshape_png: instancemap_workshape,
                     
                     treeringmap_workshape_png: treeringmap_workshape_shape_png,
@@ -310,10 +336,13 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                     _type: "combined",
                 };
-            else if(cellmap_workshape && instancemap_workshape)
+            else if(cellmap_workshape 
+                 && instancemap_workshape 
+                 && cells_serialized)
                 return {
                     cellmap_workshape_png:     cellmap_workshape,
                     cellmap_og_shape_png:      cellmap_og_shape,
+                    cells_serialized:          cells_serialized,
                     instancemap_workshape_png: instancemap_workshape,
                     
                     _type: "cells"
@@ -404,6 +433,53 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         } finally {
             if(read_cb_handle != 0)
                 delete this.#read_file_callback_table[read_cb_handle];
+            this.#free_allocated_buffers();
+            this.#free_dynamic_buffer_outputs();
+        }
+    }
+
+
+    async rasterize_cell_indices_and_encode_as_png(
+        cells_serialized: ArrayBuffer, 
+        size: ImageSize
+    ): Promise<File|Error> {
+        try {
+            const cells_nbytes:number = cells_serialized.byteLength;
+            const cells_p:           pointer = this.#malloc(cells_nbytes);
+            const png_buffer_pp:     pointer = this.#malloc(8);
+            const png_buffer_size_p: pointer = this.#malloc(8);
+
+            this.wasm.HEAPU8.set(new Uint8Array(cells_serialized), cells_p)
+
+            const rc:number = 
+                await this.wasm._rasterize_cell_indices_and_encode_as_png(
+                    cells_p,
+                    cells_nbytes,
+                    size.width,
+                    size.height,
+                    png_buffer_pp,
+                    png_buffer_size_p
+                );
+            // NOTE: the wasm function above returns before the execution is 
+            // finished because of async issues, so currently polling until done
+            while(this.wasm.Asyncify.currData != null)
+                await wait(1);
+            if(rc != 0)
+                return new Error(`WASM error code = ${rc}`)
+        
+            const png_u8:Uint8Array<ArrayBuffer>|null
+                = this.#read_dynamic_output_buffer(
+                    png_buffer_pp,
+                    png_buffer_size_p
+                )
+            if(png_u8 == null)
+                return new Error(`WASM error: did not return file.`)
+
+            return new File([png_u8], "cellmap.png");
+        } catch(e) {
+            console.error('Unexpected error:', e)
+            return e as Error;
+        } finally {
             this.#free_allocated_buffers();
             this.#free_dynamic_buffer_outputs();
         }

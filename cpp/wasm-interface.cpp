@@ -16,6 +16,7 @@ enum Errors_WASM {
     POSTPROCESSING_CELLMAPFILE_FAILED     = -102,
     POSTPROCESSING_COMBINED_FAILED        = -103,
     NEITHER_TREERINGSMAP_NOR_CELLMAP_PROVIDED = -104,
+    PNG_ENCODING_FAILED                   = -110,
 
     UNEXPECTED      = -998,
     NOT_IMPLEMENTED = -999,
@@ -51,6 +52,8 @@ int postprocess_combined_wasm(
     uint32_t*   cellmap_workshape_png_size_p,
     uint8_t**   cellmap_og_shape_png_pp,
     uint32_t*   cellmap_og_shape_png_size_p,
+    uint8_t**   cells_serialized_og_shape_pp,
+    uint32_t*   cells_serialized_og_shape_size_p,
     uint8_t**   instancemap_workshape_png_pp,
     uint32_t*   instancemap_workshape_png_size_p,
     uint8_t**   treeringmap_workshape_png_pp,
@@ -98,7 +101,8 @@ int postprocess_combined_wasm(
     }
 
 
-    std::optional<TreeringsPostprocessingResult> expect_output_rings = std::nullopt;
+    std::expected<TreeringsPostprocessingResult, std::string> expect_output_rings = 
+        std::unexpected("not initialized");
     if(have_treeringmap){ 
         expect_output_rings = postprocess_treeringmapfile(
             treeringmap_filesize, 
@@ -135,18 +139,21 @@ int postprocess_combined_wasm(
 
 
 
-
     if(have_cellmap){
         const CellsPostprocessingResult& output_cells = *expect_output_cells;
 
         // shared pointers
-        const Buffer_p& cellmap_png = output_cells.cellmap_workshape_png;
-        const Buffer_p& instanacemap_png = output_cells.instancemap_workshape_png;
+        const Buffer_p cellmap_png = output_cells.cellmap_workshape_png;
+        const Buffer_p instanacemap_png = output_cells.instancemap_workshape_png;
+        const Buffer_p cells_serialized = 
+            serialize_list_of_rle_components(output_cells.cells_rle_og_shape);
 
         *cellmap_workshape_png_pp     = cellmap_png->data;
         *cellmap_workshape_png_size_p = cellmap_png->size;
         *instancemap_workshape_png_pp     = instanacemap_png->data;
         *instancemap_workshape_png_size_p = instanacemap_png->size;
+        *cells_serialized_og_shape_pp     = cells_serialized->data;
+        *cells_serialized_og_shape_size_p = cells_serialized->size;
 
         wasm_output_storage.emplace(
             (void*)cellmap_workshape_png_pp, 
@@ -156,6 +163,22 @@ int postprocess_combined_wasm(
             (void*)instancemap_workshape_png_pp, 
             [x = std::move(instanacemap_png)]() mutable { /* no-op */ } 
         );
+        wasm_output_storage.emplace(
+            (void*)cells_serialized_og_shape_pp, 
+            [x = std::move(cells_serialized)]() mutable { /* no-op */ } 
+        );
+
+
+        const auto& expect_cellmap_og_png = output_cells.cellmap_og_shape_png;
+        if(expect_cellmap_og_png){
+            const Buffer_p& cellmap_og_png = expect_cellmap_og_png.value();
+            *cellmap_og_shape_png_pp     = cellmap_og_png->data;
+            *cellmap_og_shape_png_size_p = cellmap_og_png->size;
+            wasm_output_storage.emplace(
+                (void*)cellmap_og_shape_png_pp, 
+                [x = std::move(cellmap_og_png)]() mutable { /* no-op */ } 
+            );
+        }
     }
 
     
@@ -250,7 +273,7 @@ int resize_mask(
 ) {
     *returncode = UNEXPECTED;
 
-    const auto expect_mask = load_and_resize_binary_png2(
+    const auto expect_mask = load_and_resize_binary_png(
         filesize, 
         read_file_callback_p, 
         read_file_callback_handle,
@@ -285,6 +308,46 @@ int resize_mask(
 
     *returncode = OK;
     return *returncode;
+}
+
+
+
+// no resizing
+int rasterize_cell_indices_and_encode_as_png(
+    // input: cells serialized
+    const uint8_t* cells_serialized,
+    uint32_t       cells_serialized_size,
+    // mask size (no resizing)
+    uint32_t    width,
+    uint32_t    height,
+    // output
+    uint8_t**   png_buffer_pp,
+    uint32_t*   png_buffer_size_p
+) {
+
+    const auto expect_cells = 
+        deserialize_list_of_rle(cells_serialized, cells_serialized_size);
+    if(!expect_cells)
+        return UNEXPECTED;
+    const std::vector<RLERun>& cells = expect_cells.value();
+
+    std::expected<Buffer_p, std::string> expect_png = 
+        rasterize_rle_and_encode_as_png_streaming(
+            cells,
+            ImageSize{.width = width,  .height = height}
+        );
+    if(!expect_png)
+        return PNG_ENCODING_FAILED;
+    const Buffer_p& png = expect_png.value();
+
+    *png_buffer_pp     = png->data;
+    *png_buffer_size_p = png->size;
+    wasm_output_storage.emplace(
+        (void*)png_buffer_pp, 
+        [x = std::move(png)]() mutable { /* no-op */ } 
+    );
+
+    return OK;
 }
 
 

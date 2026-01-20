@@ -5,6 +5,9 @@
 #include <utility>
 #include <vector>
 
+#include "../wasm-morpho/src/morphology.hpp"
+
+
 // x first, y second
 typedef std::array<double, 2> Point;
 typedef std::array<double, 2> Vector;
@@ -57,5 +60,11 @@ ListOfPoints scale_list_of_points(
     const ImageShape& from_shape, 
     const ImageShape& to_shape 
 );
+
+
+
+/** Convert pixel indices (y first, x second) to points (x first, y second),
+    optionally centering on the pixel (+0.5). */
+Points indices_to_points(const Indices2D& indices, bool center_pixel);
 
 

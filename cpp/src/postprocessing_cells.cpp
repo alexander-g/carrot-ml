@@ -9,6 +9,7 @@
 #include "./image-utils.hpp"
 #include "./postprocessing_cells.hpp"
 #include "./utils.hpp"
+#include "../wasm-morpho/src/morphology.hpp"
 
 
 
@@ -116,161 +117,23 @@ std::optional<EigenRGBMap> colorize_ringmap(
 }
 
 
-/** Convert pixel indices (y first, x second) to points (x first, y second),
-    optionally centering on the pixel (+0.5). */
-Points indices_to_points(const Indices2D& indices, bool center_pixel){
-    const double offset = 0.5 * center_pixel;
-    Points points;
-    for(const Index2D& index: indices)
-        // yx to xy
-        points.push_back({ (double)index.j + offset, (double)index.i + offset });
-    return points;
-}
-
-
-template <typename T, int R>
-using EigenSlice = Eigen::TensorSlicingOp<
-    const Eigen::array<Eigen::Index, 2>,
-    const Eigen::array<Eigen::Index, 2>,
-    Eigen::Tensor<T, 2, R>
->;
-
-template <typename T, int R>
-EigenSlice<T,R> crop_3x3_around_index(
-    Eigen::Tensor<T,2,R>& x,   //nonconst
-    const Index2D& index
-) {
-    const auto D0 = x.dimension(0);
-    const auto D1 = x.dimension(1);
-    const int i0 = (index.i <= 0)? 0 : index.i -1;
-    const int j0 = (index.j <= 0)? 0 : index.j -1;
-    const int i1 = (index.i+1 >= D0)? D0 : index.i + 2;
-    const int j1 = (index.j+1 >= D1)? D1 : index.j + 2;
-    const Eigen::array<Eigen::Index, 2> 
-        offsets = {(Eigen::Index)i0,    (Eigen::Index)j0},
-        extents = {(Eigen::Index)i1-i0, (Eigen::Index)j1-j0};
-
-    return x.slice(offsets, extents);
-}
-
-
-template <typename T, int D, int R>
-bool contains_other_nonzero(const Eigen::Tensor<T,D,R>& x, T i) {
-    const auto size = x.size();
-    const auto data = x.data();
-    for (std::ptrdiff_t idx = 0; idx < size; idx++)
-        if(data[idx] != 0  && data[idx] != i)
-            return true;
-    return false;
-}
-
-
-struct MaskAndCC {
-    EigenBinaryMap mask;
-    ListOfIndices2D objects;
-};
-
-/** Scale connected components objects, create masks and make sure they are 
-    delineated (do not touch each other). */
-MaskAndCC scale_objects_and_create_mask(
-    const ListOfIndices2D& objects,
-    const ImageSize& from_size,
-    const ImageSize& to_size
-) {
-    const ImageShape from_shape = {from_size.height, from_size.width};
-    const ImageShape to_shape   = {to_size.height,   to_size.width};
-
-    // iterate starting with smallest objects to avoid them getting swallowed
-    const auto sorted_objects = std::views::reverse( sort_by_length(objects) );
-
-    EigenBinaryMap mask(to_size.height, to_size.width);
-    EigenIntMap instancemap(to_size.height, to_size.width);
-    mask.setZero();
-    instancemap.setZero();
-
-    ListOfIndices2D output_objects;
-    for(int object_idx = 0; object_idx < sorted_objects.size(); object_idx++) {
-        const int object_label = object_idx + 1;
-        const Indices2D& object = sorted_objects[object_idx];
-        const Points points = indices_to_points(object, /*center_pixel=*/true);
-        const Points scaled = scale_points(points, from_shape, to_shape);
-
-        Indices2D quantized_object;
-        for(const Point& p: scaled){
-            // xy to yx
-            const Index2D quant_p = {
-                .i = (Eigen::Index) std::floor(p[1]),
-                .j = (Eigen::Index) std::floor(p[0])
-            };
-            if( mask(quant_p.i, quant_p.j) == true )
-                continue;
-
-            auto cropslice = crop_3x3_around_index(instancemap, quant_p);
-            if( contains_other_nonzero(EigenIntMap(cropslice), object_label) )
-                continue;
-
-            cropslice.setConstant(object_label);
-            mask(quant_p.i, quant_p.j) = true;
-            quantized_object.push_back(quant_p);
-        }
-        output_objects.push_back(quantized_object);
-    }
-    return MaskAndCC{.mask=mask, .objects=output_objects};
-}
 
 
 
 
 
-/** Load a binary png, perform streaming connected components on the original 
-    sized image and then resize them to a target size.  */
-std::expected<MaskAndCC, std::string> 
-load_binary_png_connected_components_and_resize(
-    size_t      filesize,
-    const void* read_file_callback_p,
-    const void* read_file_handle,
-    const ImageSize target_size
-) {
-    StreamingConnectedComponents scc;
 
-    ImageSize og_size = {.width=0, .height=0};
-    bool all_ok = true;
-
-    const int rc = png_read_streaming(
-        filesize, 
-        read_file_callback_p, 
-        read_file_handle, 
-        [&scc, &og_size, &all_ok](const EigenRGBAMap& rows) {
-            const EigenBinaryMap binary_rows = rgba_to_binary(rows);
-
-            for(int i=0; i < binary_rows.dimension(0); i++) {
-                const EigenBinaryRow row = row_slice(binary_rows, i).value();
-                const auto expect_ok = scc.push_image_row(row);
-                if(!expect_ok) {
-                    all_ok = false;
-                    return -1;
-                }
-            }
-            og_size.height += rows.dimension(0);
-            og_size.width   = rows.dimension(1);
-            return 0;
-        }
-    );
-    if(rc)
-        return std::unexpected("Loading png failed");
-    if(!all_ok)
-        return std::unexpected("Connected components failed");
-
-    const CCResultStreaming cc_result = scc.finalize();
-    return scale_objects_and_create_mask(cc_result.components, og_size, target_size);
-}
-
-
-ListOfIndices2D ccresult_to_indices(CCResult& result) {
-    ListOfIndices2D output;
-    for(DFS_Result& dfs: result.dfs_results)
-        output.push_back(std::move(dfs.visited));
-    return output;
+/** Rasterize cells, resize to target size and encode as binary mask PNG. */
+std::expected<Buffer_p, std::string> rasterize_cell_indices_and_encode_as_png(
+    const ListOfIndices2D& cell_ixs, 
+    const ImageSize& source_size, 
+    const ImageSize& target_size
+){
+    const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
+    const ListOfRLEComponents cells_rle_scaled = 
+        scale_rle_components(cells_rle, source_size, target_size);
+    const std::vector<RLERun> flat_rle = flatten_rle_components(cells_rle_scaled);
+    return rasterize_rle_and_encode_as_png_streaming(flat_rle, target_size);
 }
 
 
@@ -285,12 +148,17 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
 ) {
     // if not png: error?
 
+    const ImageSize worksize = 
+        {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first};
+    const ImageSize og_size = 
+        {.width = (uint32_t)og_shape.second, .height = (uint32_t)og_shape.first};
+
     // non-const for std::move
     auto expect_mask_and_cc = load_binary_png_connected_components_and_resize(
         filesize,
         read_file_callback_p,
         read_file_handle,
-        {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first}
+        worksize
     );
     if(!expect_mask_and_cc)
         return std::unexpected(expect_mask_and_cc.error());
@@ -327,21 +195,25 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     if(workshape == og_shape)
         cellmap_og_shape_png = cellmap_workshape_png;
     else if(!do_not_resize_to_og_shape) {
-        const std::expected<Buffer_p, int> expect_cellmap_og_shape_png = 
-            resize_image_and_encode_as_png(
-                binary_to_rgba(mask),
-                {.width=(uint32_t)og_shape.second, .height=(uint32_t)og_shape.first}
-            );
+        const std::expected<Buffer_p, std::string> expect_cellmap_og_shape_png = 
+            rasterize_cell_indices_and_encode_as_png(cell_ixs, worksize, og_size);
         if(!expect_cellmap_og_shape_png)
-            return std::unexpected("Failed to resize to og shape and compress");
+            return std::unexpected(expect_cellmap_og_shape_png.error());
         cellmap_og_shape_png = expect_cellmap_og_shape_png.value();
     } //else dont resize here, takes too long
+
+    // do resize the cell indices (as RLE to save memory)
+    const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
+    const ListOfRLEComponents cells_rle_scaled = 
+        scale_rle_components(cells_rle, worksize, og_size);
+
     
     return CellsPostprocessingResult{
         /*cellmap_workshape_png     = */ cellmap_workshape_png,
         /*cellmap_og_shape_png      = */ cellmap_og_shape_png,
         /*instancemap_workshape_png = */ instancemap_workshape_png_x.value(),
-        /*cells                     = */ std::move(cell_ixs)
+        /*cells                     = */ std::move(cell_ixs),
+        /*cells_rle_og_shape        = */ std::move(cells_rle_scaled)
     };
 }
 
@@ -370,16 +242,16 @@ std::vector<Path> polygons_from_treeringspaths(const PairedPaths& treering_paths
     return output;
 }
 
-std::optional<Box> box_from_indices(const Indices2D& indices) {
-    if(indices.empty())
+std::optional<Box> box_from_points(const Points& points) {
+    if(points.empty())
         return std::nullopt;
 
     Box output{ INFINITY, INFINITY, -INFINITY, -INFINITY };
-    for(const Index2D& index: indices){
-        output.x0 = std::min(output.x0, (double)index.j);
-        output.y0 = std::min(output.y0, (double)index.i);
-        output.x1 = std::max(output.x1, (double)index.j);
-        output.y1 = std::max(output.y1, (double)index.i);
+    for(const Point& p: points){
+        output.x0 = std::min(output.x0, p[0]);
+        output.y0 = std::min(output.y0, p[1]);
+        output.x1 = std::max(output.x1, p[0]);
+        output.y1 = std::max(output.y1, p[1]);
     }
     return output;
 }
@@ -450,6 +322,20 @@ int find_treering_for_cell(
     return largest_overlapping_treering;
 }
 
+/** Estimate the area of a cell from worksize points scaled up to og size */
+double estimate_cell_area_scaled(
+    const Points& cellpoints, 
+    const ImageSize& worksize, 
+    const ImageSize& og_size
+) {
+    const int n_points = cellpoints.size();
+    const double scale_x = og_size.width / worksize.width;
+    const double scale_y = og_size.height / worksize.height;
+
+    // a point in worksize counts as 1px x 1px, 
+    return (1 * scale_x) * (1 * scale_y) * n_points;
+}
+
 
 std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     const PairedPaths& treering_paths,
@@ -471,12 +357,13 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
             workshape,
             og_shape
         );
-        const int npixels = cellpoints.size();
-        //if(npixels == 0) // should not happen
-        //    continue;
-
         const int treering = find_treering_for_cell(treering_polygons, cellpoints);
 
+        const double area_cell = estimate_cell_area_scaled(
+            cellpoints, 
+            {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first},
+            {.width = (uint32_t)og_shape.second,  .height = (uint32_t)og_shape.first}
+        );
         const double position_within = 
             (treering >= 0)
             ? estimate_position_within_treering(
@@ -487,9 +374,9 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
 
         cell_info.push_back(CellInfo{
             .id         = i,
-            .box_xy     = box_from_indices(cell_indices).value_or(Box{0,0,0,0}),
+            .box_xy     = box_from_points(cellpoints).value_or(Box{0,0,0,0}),
             .year_index = treering,
-            .area_px    = (double)npixels,
+            .area_px    = area_cell,
             .position_within = position_within
         });
     }

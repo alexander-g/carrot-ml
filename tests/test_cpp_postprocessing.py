@@ -71,7 +71,7 @@ def test_segmentation_to_paths():
 
 
 
-def test_postprocess_treeringmapfile():
+def test_postprocess_treeringmapfile1():
     mask = np.zeros([1000,1000], dtype=bool)
     mask[10:-10, 100:110] = 1
     mask[50:-50, 200:250] = 1
@@ -262,6 +262,8 @@ def test_postprocess_cellmapfile_ensure_delineated():
     mask[100:-100, 51:133] = 1
     mask[300:-300, 134:162] = 1
     mask[300:-300, 163:164] = 1  # thin one (gets swallowed by previous)
+    #diagonal line, to make sure it stays the same
+    mask[ np.arange(100,190), np.arange(500,590) ] = 1
     
     tempdir = tempfile.TemporaryDirectory()
     maskf = os.path.join(tempdir.name, 'testmask.png')
@@ -275,8 +277,8 @@ def test_postprocess_cellmapfile_ensure_delineated():
         PIL.Image.open( io.BytesIO(out1['instancemap_workshape_png']) )
     )
     counts1 = np.unique(instancemap1.reshape(-1,3), axis=0, return_counts=True)[1]
-    # 4 cells + background:
-    assert len( counts1 ) == 5
+    # 5 objects + background:
+    assert len( counts1 ) == 6
 
 
     # re-postprocess on the output mask
@@ -288,14 +290,19 @@ def test_postprocess_cellmapfile_ensure_delineated():
     instancemap2 = np.array(
         PIL.Image.open( io.BytesIO(out2['instancemap_workshape_png']) )
     )
-
-
     counts2 = np.unique(instancemap2.reshape(-1,3), axis=0, return_counts=True)[1]
     # should be still 4 + 1
-    assert len( counts2 ) == 5
+    assert len( counts2 ) == len(counts1)
 
     # sizes should be unchanged
     assert sorted(counts1.tolist()) == sorted(counts2.tolist())
+
+    # bug: make sure the delineation boundary is at most 1px wide
+    out3 = postp.postprocess_cellmapfile(maskf, og_shape, og_shape)
+    instancemap3 = np.array(
+        PIL.Image.open( io.BytesIO(out3['instancemap_workshape_png']) )
+    )
+    assert (instancemap3.any(-1)[310, 140:164] == 0).sum() == 1 # type: ignore
 
 
 
@@ -328,12 +335,13 @@ def test_postprocessing_combined():
     treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap3-combined.png' )
     cellmapfile = os.path.join( os.path.dirname(__file__), 'assets', 'cellmap3-combined.png' )
 
+    mask = np.array(PIL.Image.open(cellmapfile).convert('L')).astype(bool)
+    labeled_mask, expected_n_cells = scipy.ndimage.label(mask)
+
     workshape = (777,777)
-    og_shape  = (2000,2000)
+    og_shape  = mask.shape
     output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
 
-    mask = np.array(PIL.Image.open(cellmapfile).convert('L'))
-    _, expected_n_cells = scipy.ndimage.label(mask)
     assert len( output['cell_info'] ) == expected_n_cells
 
     year_indices = [ c['year_index'] for c in output['cell_info'] ]
@@ -342,6 +350,17 @@ def test_postprocessing_combined():
     for c in output['cell_info']:
         if c['year_index'] >= 0:
             assert 0 <= c['position_within'] <= 1
+    
+    # bug: boxes in og shape
+    all_cellboxes = np.array([c['box_xy'] for c in output['cell_info']])
+    assert workshape[0] < all_cellboxes.max(axis=0)[1] <= og_shape[0]
+    assert workshape[1] < all_cellboxes.max(axis=0)[0] <= og_shape[1]
+
+    # bug: areas also in og shape
+    object_areas_scipy = scipy.ndimage.sum_labels(mask, labeled_mask, index=np.arange(expected_n_cells))
+    all_cellareas = np.array([c['area_px'] for c in output['cell_info']])
+    assert object_areas_scipy.max() * 0.9 < all_cellareas.max()  # very approximate
+
 
     instancemap1 = np.array(
         PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) )
@@ -371,5 +390,99 @@ def test_postprocessing_combined():
     # cell3_color = instancemap1[28, 128]
     # assert cell3_color.tolist() != [224,224,224]
     
+
+
+# scale RLE components, making sure they map back
+def test_rle_scaling():
+    rle = [
+        np.array([
+            (4, 1, 10),
+            (5, 2, 8),
+            (6, 2, 9),
+            (6, 20, 5),
+            (7, 2, 9),
+            (7, 20, 7),
+            (8, 3, 30)
+        ]),
+        np.array([
+            (14, 1, 10),
+            (15, 2, 8),
+            (16, 2, 9),
+            (16, 20, 5),
+            (17, 2, 9),
+            (17, 20, 7),
+            (18, 2, 30)
+        ]),
+    ]
+
+    fromshape = (40,44)
+    toshape   = (144, 147)
+    
+    output1 = postp.scale_rle_components(rle, fromshape, toshape)
+
+    # make sure rows are sorted
+    for component in output1:
+        rows = [row for row, _, _ in component.astype(int)]
+        assert (np.diff(rows) >= 0).all()
+
+    output2 = postp.scale_rle_components(output1, toshape, fromshape)
+
+    assert len(output2) == len(rle)
+    for out2_i, rle_i in zip(output2, rle):
+        np.allclose(out2_i, rle_i)
+
+
+
+# bug: downscale components, after rasterization they should be still connected
+def test_rle_scaling2():
+    rle = [
+        np.array([
+            (4, 1, 5),  # x0=1 / x1=5
+            (5, 6, 3),  # x0=6 / x1=8
+            (6, 9, 4),  # x0=9 / x1=12
+            (7, 13, 5),  # x0=13 / x1=17
+            (8, 18, 5),  # x0=18 / x1=22
+        ]),
+    ]
+
+    fromshape = (50, 55)
+    toshape   = (20, 22)
+    
+    scaled_rle = postp.scale_rle_components(rle, fromshape, toshape)
+    print(scaled_rle)
+
+    #rasterize
+    X = np.zeros( toshape, dtype='bool' ) 
+    assert len(scaled_rle) == 1
+    for rlerun in scaled_rle[0]:
+        for i in range(rlerun[2]):
+            X[rlerun[0], rlerun[1]+i] = 1
+    
+    _, n_components = scipy.ndimage.label(X, structure=np.ones([3,3]))
+    assert n_components == 1
+
+    # make sure coalesced / no duplicate rows
+    rows = [run[0] for run in scaled_rle[0]]
+    assert len(rows) == len(set(rows))
+
+    # bug2: asymmetric u-shape, 2nd arm of the u disappears because too thin
+    rle2 = [
+        np.array([
+            (4,1,1),
+            (5,1,1),
+            (6,1,1),
+            (7,1,1),
+            (8,1,1),
+            (9,1,10),
+            (8,9,1),
+            (7,9,1),
+            (6,9,1),
+        ])
+    ]
+    scaled_rle2 = postp.scale_rle_components(rle2, fromshape, toshape)
+
+    rows2 = [run[0] for run in scaled_rle2[0]]
+    _, rows2_counts = np.unique(rows2, return_counts=True)
+    assert rows2_counts.max() > 1
 
 

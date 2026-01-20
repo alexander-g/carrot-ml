@@ -135,3 +135,15 @@ ListOfPoints scale_list_of_points(
 }
 
 
+/** Convert pixel indices (y first, x second) to points (x first, y second),
+    optionally centering on the pixel (+0.5). */
+Points indices_to_points(const Indices2D& indices, bool center_pixel){
+    const double offset = 0.5 * center_pixel;
+    Points points;
+    for(const Index2D& index: indices)
+        // yx to xy
+        points.push_back({ (double)index.j + offset, (double)index.i + offset });
+    return points;
+}
+
+
