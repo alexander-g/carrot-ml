@@ -113,7 +113,7 @@ py::dict postprocess_treeringmapfile_py(
         og_shape
     );
     if(!expect_output)
-        throw std::runtime_error("Postprocessing failed");
+        throw std::runtime_error("Postprocessing failed: " + expect_output.error());
     const TreeringsPostprocessingResult& output = expect_output.value();
 
     py::dict d;

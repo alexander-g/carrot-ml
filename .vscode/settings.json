@@ -1,4 +1,10 @@
 {
     "deno.path": "./deno.sh",
-    "deno.enable": true
+    "deno.enable": true,
+    "search.exclude": {
+        "**/libjpeg-turbo": true,
+        "**/libpng": true,
+        "**/libtiff": true,
+        "**/zlib": true
+    }
 }
