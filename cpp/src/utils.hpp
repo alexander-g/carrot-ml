@@ -93,3 +93,29 @@ auto concat_copy(const R1& a, const R2& b)
     return out;
 }
 
+
+
+#include <chrono>
+
+inline double now_s() {
+    using namespace std::chrono;
+    return duration_cast<duration<double>>(
+        system_clock::now().time_since_epoch()
+    ).count();
+}
+
+inline double now_ms() {
+    using namespace std::chrono;
+    return duration_cast<duration<double, std::milli>>(
+        system_clock::now().time_since_epoch()
+    ).count();
+}
+
+inline double now_us() {
+    using namespace std::chrono;
+    return duration_cast<duration<double, std::micro>>(
+        system_clock::now().time_since_epoch()
+    ).count();
+}
+
+
