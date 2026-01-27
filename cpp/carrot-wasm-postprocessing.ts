@@ -8,6 +8,7 @@ import type {
     Path,
     Point,
     ImageSize,
+    AreaOfInterest,
 } from "./carrot-wasm-postprocessing.d.ts"
 
 import { 
@@ -38,6 +39,8 @@ type CARROT_Postprocessing_WASM = {
         workshape_height:     number,
         og_shape_width:       number,
         og_shape_height:      number,
+        aoi_json_p:           pointer,
+        aoi_json_size:        number,
         // outputs
         cellmap_workshape_png:           pointer,
         cellmap_workshape_png_size:      pointer,
@@ -138,6 +141,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
+        aoi?:        AreaOfInterest,
     ): Promise<PostprocessingResult|Error> {
 
         let cells_handle:number = 0;
@@ -174,6 +178,11 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         const cell_info_json_size_p:pointer            = this.#malloc(8);
 
         try {
+            const [aoi_buffer_p, aoi_buffer_size] = 
+                aoi
+                ? this.#write_string_to_wasm_memory(JSON.stringify(aoi))
+                : [0, 0];
+
             let rc:number = await this.wasm._postprocess_combined_wasm(
                 cellmap?.size ?? 0, 
                 this.#read_file_callback_ptr, 
@@ -186,6 +195,9 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                 work_size.height,
                 og_size.width,
                 og_size.height,
+
+                aoi_buffer_p,
+                aoi_buffer_size,
 
                 cellmap_workshape_png_pp,
                 cellmap_workshape_png_size_p,
@@ -329,6 +341,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     treeringmap_workshape_png: treeringmap_workshape_shape_png,
                     treeringmap_og_shape_png:  treeringmap_og_shape_png,
                     ring_points_xy:            paired_paths,
+                    aoi:                       aoi ?? null,
 
                     ringmap_workshape_png:
                         new File([ringmap_workshape_png_u8], 'ringmap.png'),
@@ -352,6 +365,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     treeringmap_workshape_png: treeringmap_workshape_shape_png,
                     treeringmap_og_shape_png:  treeringmap_og_shape_png,
                     ring_points_xy:            paired_paths,
+                    aoi:                       aoi ?? null,
 
                     _type: "treerings"
                 }
@@ -552,6 +566,16 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
         )
         this.#dynamic_output_buffers.push(buffer_pp);
         return data_u8;
+    }
+
+    /** Allocate memory, write string, return pointer and its size */
+    #write_string_to_wasm_memory(s:string): [pointer, number] {
+        const buffer:Uint8Array<ArrayBuffer> = new TextEncoder().encode(s);
+        const buffer_size:number = buffer.byteLength;
+        const buffer_p:pointer   = this.#malloc(buffer_size);
+        this.wasm.HEAPU8.set(buffer, buffer_p)
+        
+        return [buffer_p, buffer_size]
     }
 
     #free_dynamic_buffer_outputs() {

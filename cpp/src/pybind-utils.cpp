@@ -81,6 +81,49 @@ py::list vec_paired_paths_to_numpy(const PairedPaths& pp) {
     return out;
 }
 
+PairedPaths numpy_paired_paths_to_vec(py::list ppaths_py) {
+    PairedPaths output;
+    output.reserve(py::len(ppaths_py));
+    for(py::handle h: ppaths_py) {
+        const py::tuple pair = py::cast<py::tuple>(h);
+        if(py::len(pair) != 2)
+            throw std::runtime_error("List does not contains pairs");
+
+        const py_f64_array a = py::cast<py::array>(pair[0]);
+        const py_f64_array b = py::cast<py::array>(pair[1]);
+        if(py::len(a) != py::len(b))
+            throw std::runtime_error("Paired paths do not have the same length");
+
+        output.push_back({
+            path_numpy_to_stdvec(a),
+            path_numpy_to_stdvec(b)
+        });
+    }
+    return output;
+}
+
+AreaOfInterestRect py_aoi_to_cpp(py::list aoipoints) {
+    if(py::len(aoipoints) != 4)
+        throw std::runtime_error("Expected 4 point for AoI");
+
+    AreaOfInterestRect output;
+    // future-proofing
+    static_assert( sizeof(AreaOfInterestRect) == sizeof(double) * 8 );
+    double* output_as_f64 = (double*) &output;
+    for(int i = 0; i < 4; i++) {
+        const py::tuple pair = py::cast<py::tuple>(aoipoints[i]);
+        if(py::len(pair) != 2)
+            throw std::runtime_error("AoI points are not 2-tuples");
+
+        const double x = pair[0].cast<double>();
+        const double y = pair[1].cast<double>();
+
+        output_as_f64[i*2+0] = x;
+        output_as_f64[i*2+1] = y;
+    }
+    return output;
+}
+
 
 py::bytes buffer_to_bytes(const Buffer& b) {
     return py::bytes((const char*)b.data, (size_t)b.size);

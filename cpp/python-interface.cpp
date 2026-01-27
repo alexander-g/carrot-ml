@@ -1,4 +1,5 @@
 #include <iostream>
+#include <optional>
 #include <utility>
 
 #include <Eigen/Dense>
@@ -6,6 +7,8 @@
 #include <unsupported/Eigen/CXX11/Tensor>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+// NOTE2SELF: needed for std::optional
+#include <pybind11/stl.h>
 
 #include "./wasm-morpho/src/pybind-utils.hpp"
 #include "./wasm-morpho/src/morphology.hpp"
@@ -93,13 +96,29 @@ py::list scale_rle_components_py(
     return rle_components_to_py_list(output);
 }
 
+py::list crop_paired_paths_to_aoi_py(
+    const py::list& paired_paths_py,
+    const py_f64_array aoi_py
+) {
+    const PairedPaths ppaths = numpy_paired_paths_to_vec(paired_paths_py);
+    const AreaOfInterestRect aoi = py_aoi_to_cpp(aoi_py);
+
+    const PairedPaths output = crop_paired_paths_to_aoi(ppaths, aoi);
+    return vec_paired_paths_to_numpy(output);
+}
+
 
 
 py::dict postprocess_treeringmapfile_py(
     const std::string& path, 
     const ImageShape& workshape, 
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    std::optional<const py_f64_array> aoi_py = std::nullopt
 ) {
+    std::optional<AreaOfInterestRect> aoi = std::nullopt;
+    if(aoi_py)
+        aoi = py_aoi_to_cpp(aoi_py.value());
+
     const auto fhandle_o = FileHandle::open(path.c_str());
     if(!fhandle_o)
         throw std::runtime_error("Could not open file");
@@ -110,7 +129,8 @@ py::dict postprocess_treeringmapfile_py(
         (const void*) &fhandle->read_callback, 
         (void*) fhandle, 
         workshape,
-        og_shape
+        og_shape,
+        aoi
     );
     if(!expect_output)
         throw std::runtime_error("Postprocessing failed: " + expect_output.error());
@@ -121,7 +141,8 @@ py::dict postprocess_treeringmapfile_py(
         buffer_to_bytes(*output.treeringmap_workshape_png);
     d["treeringmap_ogshape_png"] = 
         buffer_to_bytes(*output.treeringmap_og_shape_png.value()); // not nullopt
-    d["ring_points_xy"] = vec_paired_paths_to_numpy(output.ring_points_xy);
+    //d["ring_points_xy"] = vec_paired_paths_to_numpy(output.ring_points_xy);
+    d["ring_points_xy"] = vec_paired_paths_to_numpy(output.ring_points_in_aoi_xy);
     return d;
 }
 
@@ -159,7 +180,8 @@ py::dict postprocess_combined_from_files_py(
     const std::string& cellmappath,
     const std::string& treeringmappath,
     const ImageShape& workshape, 
-    const ImageShape& og_shape
+    const ImageShape& og_shape,
+    const std::optional<py_f64_array> aoi_py = std::nullopt
 ) {
     const auto expect_fhandle_cells = FileHandle::open(cellmappath.c_str());
     const auto expect_fhandle_rings = FileHandle::open(treeringmappath.c_str());
@@ -170,6 +192,9 @@ py::dict postprocess_combined_from_files_py(
     const FileHandle* fhandle_cells = expect_fhandle_cells.value().get();
     const FileHandle* fhandle_rings = expect_fhandle_rings.value().get();
 
+    std::optional<AreaOfInterestRect> aoi = std::nullopt;
+    if(aoi_py)
+        aoi = py_aoi_to_cpp(aoi_py.value());
 
     const auto expect_output_cells = postprocess_cellmapfile(
         fhandle_cells->size, 
@@ -190,7 +215,8 @@ py::dict postprocess_combined_from_files_py(
         (const void*) &fhandle_rings->read_callback, 
         (void*) fhandle_rings, 
         workshape,
-        og_shape
+        og_shape,
+        aoi
     );
     if(!expect_output_rings)
         throw std::runtime_error("Treerings postprocessing failed");
@@ -271,13 +297,22 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         py::arg("from_shape"),
         py::arg("to_shape")
     );
+    
+    m.def(
+        "crop_paired_paths_to_aoi",
+        crop_paired_paths_to_aoi_py,
+        py::arg("paired_paths"),
+        py::arg("aoi")
+    );
 
+    // main functions
     m.def(
         "postprocess_treeringmapfile",
         postprocess_treeringmapfile_py,
         py::arg("path").noconvert(),
         py::arg("workshape"),
-        py::arg("og_shape")
+        py::arg("og_shape"),
+        py::arg("aoi") = std::nullopt
     );
 
     m.def(
@@ -294,7 +329,8 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         py::arg("cellmappath").noconvert(),
         py::arg("treeringmappath").noconvert(),
         py::arg("workshape"),
-        py::arg("og_shape")
+        py::arg("og_shape"),
+        py::arg("aoi") = std::nullopt
     );
     
 }

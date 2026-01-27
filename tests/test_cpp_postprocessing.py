@@ -486,3 +486,87 @@ def test_rle_scaling2():
     assert rows2_counts.max() > 1
 
 
+def test_crop_paired_paths_to_aoi():
+    ppaths = [
+        (
+            np.array([
+                ( 0,  0), # outside
+                (10, 10), # outside
+                (20, 20), # inside
+                (30, 30), # inside
+                (40, 40), # inside
+            ]),
+            np.array([
+                (10,  0),  # outside
+                (19,  9),  # outside
+                #(20, 10), # removed bc ambiguous, on the aoi border
+                (30, 20),  # inside
+                (40, 30),  # inside
+                (50, 40),  # inside
+            ]),
+        )
+    ]
+    aoi0 = [
+        (15,  10),
+        (150, 10),
+        (150, 150),
+        (15,  150)
+    ]
+
+    output0 = postp.crop_paired_paths_to_aoi(ppaths, aoi0)
+
+    output00 = output0[0]
+
+    assert len(output00[0]) == len(output00[1])
+    assert len(output00[0]) == 4
+    assert (output00[0][-3:] == ppaths[0][0][-3:]).all()
+    assert (output00[1][-3:] == ppaths[0][1][-3:]).all()
+    assert all( output00[0][0] == (15,15) )
+    assert all( output00[1][0] == (20,10) )
+
+
+    aoi1 = [
+        (2015,  2010),
+        (20150, 2010),
+        (20150, 20150),
+        (2015,  20150)
+    ]
+    # all points outside of the aoi
+    output1 = postp.crop_paired_paths_to_aoi(ppaths, aoi1)
+    assert output1 == []
+
+
+    # TODO: uncomment and fix
+    # ppaths2 = [
+    #     (
+    #         np.array([
+    #             (20, 20), # inside
+    #             (30, 20), # inside
+    #             (40, 20), # inside
+    #             (50,  5), # outside
+    #             (60, 20), # inside
+    #             (70, 20), # inside
+    #         ]),
+    #         np.array([
+    #             (20, 30),  # inside
+    #             (30, 30),  # inside
+    #             (40, 30),  # inside
+    #             (50, 30),  # inside
+    #             (60, 30),  # inside
+    #             (70, 30),  # inside
+    #         ]),
+    #     )
+    # ]
+    # aoi2 = [
+    #     (10,  10),
+    #     (100, 10),
+    #     (100, 100),
+    #     (10,  100)
+    # ]
+    # # make only valid points are used, without gaps or interpolation
+    # output2 = postp.crop_paired_paths_to_aoi(ppaths2, aoi2)
+    # print(output2)
+    # assert len(output2[0][0]) == 3
+    # assert np.allclose(output2[0][0], ppaths2[0][0][:3])
+
+

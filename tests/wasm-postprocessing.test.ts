@@ -1,3 +1,4 @@
+import { AreaOfInterest } from "../cpp/carrot-wasm-postprocessing.d.ts";
 import { initialize } from "../cpp/carrot-wasm-postprocessing.ts"
 
 import { asserts } from "./dep.ts"
@@ -148,5 +149,35 @@ Deno.test('cellmapfile5', async () => {
 
     // both masks should be the same, quick test
     asserts.assertEquals(output1.cellmap_workshape_png.size, output2.cellmap_workshape_png.size)
+})
+
+
+
+
+
+Deno.test('postprocess_combined-with-aoi', async () => {
+    const module = await initialize()
+
+    const worksize = {width: 555, height:555}
+    const og_size = {width:2048, height:2048}
+
+    const filepath0 = import.meta.resolve('./assets/cellmap3-combined.png').replace('file://','')
+    const cellmapfile0 = new File([Deno.readFileSync(filepath0)], 'cellmap3-combined.png')
+    const filepath1 = import.meta.resolve('./assets/treeringsmap3-combined.png').replace('file://','')
+    const treeringmapfile1 = new File([Deno.readFileSync(filepath1)], 'treeringsmap3-combined.png')
+
+    const aoi:AreaOfInterest = [
+        [630,  330],
+        [1600, 330],
+        [1600, 1900],
+        [630,  1900]
+    ]
+    const output1 = await module.postprocess_combined(cellmapfile0, treeringmapfile1, worksize, og_size, aoi)
+    //console.log(output1)
+    asserts.assertNotInstanceOf(output1, Error)
+    asserts.assert('ringmap_workshape_png' in output1)
+
+    asserts.assertGreater(output1.cell_info.length, 0)
+
 })
 

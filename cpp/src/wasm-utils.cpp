@@ -79,3 +79,35 @@ deserialize_list_of_rle(const uint8_t* data, uint32_t nbytes) {
     return output;
 }
 
+
+std::expected<AreaOfInterestRect, std::string> 
+parse_aoi_json(const std::string& buffer) {
+    json j;
+    try {
+        j = json::parse(buffer);
+    } catch (const json::parse_error &e) {
+        return std::unexpected("JSON parse error: " + std::string(e.what()) );
+    }
+
+    if(!j.is_array() || j.size() != 4) 
+        return std::unexpected("expected array of 4 elements");
+
+    AreaOfInterestRect output;
+    // future-proofing
+    static_assert( sizeof(AreaOfInterestRect) == sizeof(double) * 8 );
+    double* output_as_f64 = (double*) &output;
+    for(int i = 0; i < j.size(); i++) {
+        const json &item = j[i];
+        if(!item.is_array() || item.size() != 2)
+            return std::unexpected("Element "+std::to_string(i)+" not a 2d point");
+
+        const json& v0 = item[0];
+        const json& v1 = item[1];
+        if(!v0.is_number() || !v1.is_number())
+            return std::unexpected("Element "+std::to_string(i)+" not 2 numbers");
+
+        output_as_f64[i*2 +0] = v0;
+        output_as_f64[i*2 +1] = v1;
+    }
+    return std::move(output);
+}

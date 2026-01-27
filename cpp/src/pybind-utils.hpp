@@ -31,8 +31,14 @@ py::list paths_stdvec_to_numpy(const Paths& paths);
 /** std::vector<std::pair<int,int>> to list of tp.Tuple[int,int] */
 py::list vec_pairs_to_pylist(const std::vector<std::pair<int,int>>& v);
 
-/** tp.List[tp.Tuple[np.ndarray, np.ndarray]] */
+/** vector<std::pair<Path,Path>> to tp.List[tp.Tuple[np.ndarray, np.ndarray]]*/
 py::list vec_paired_paths_to_numpy(const PairedPaths& pp);
+
+/** tp.List[tp.Tuple[np.ndarray, np.ndarray]] to vector<std::pair<Path,Path>>*/
+PairedPaths numpy_paired_paths_to_vec(py::list ppaths);
+
+/** tp.List[tp.Tuple[float,float]] to AoI struct  */
+AreaOfInterestRect py_aoi_to_cpp(py::list aoipoints);
 
 
 py::bytes buffer_to_bytes(const Buffer& b);
