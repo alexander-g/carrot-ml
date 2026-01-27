@@ -986,7 +986,198 @@ Paths connected_components_to_paths(const ListOfIndices2D& list_of_cc_indices) {
 }
 
 
+/** Compute the intersection point of two lines */
+std::optional<Point> compute_intersection(
+    const LineCoeffs& L1, 
+    const LineCoeffs& L2, 
+    double eps = 1e-12
+) {
+    const double det = L1.a * L2.b - L2.a * L1.b;
+    if (std::abs(det) <= eps)
+        // parallel
+        return std::nullopt;
+    const double x = (L2.b * (-L1.c) - L1.b * (-L2.c)) / det;
+    const double y = (L1.a * (-L2.c) - L2.a * (-L1.c)) / det;
+    return Point{x, y};
+}
 
+Path polygon_from_aoi(const AreaOfInterestRect& aoi) {
+    return Path{ aoi.p0, aoi.p1, aoi.p2, aoi.p3, aoi.p0 };
+}
+
+/** Compute the point where a line segment intersects a polygon,
+    if any, first one if multiple */
+std::optional<Point> line_segment_polygon_intersection(
+    const Point& p0,
+    const Point& p1,
+    const Path& polygon
+) {
+    const LineCoeffs line_segment_coef = line_from_two_points(p0, p1);
+    std::optional<Point> output = std::nullopt;
+    for(int i = 0; i+1 < polygon.size(); i++) {
+        const Point& poly_p0 = polygon[i];
+        const Point& poly_p1 = polygon[i+1];
+        const LineCoeffs poly_coef = line_from_two_points(poly_p0, poly_p1);
+
+        const auto expect_intersection = 
+            compute_intersection(line_segment_coef, poly_coef);
+        if(!expect_intersection)
+            continue;
+        const Point& intersection = expect_intersection.value();
+
+        if(!point_on_segment(intersection, p0, p1))
+            continue;
+        if(!point_on_segment(intersection, poly_p0, poly_p1))
+            continue;
+
+        output = intersection;
+        break;
+    }
+    return output;
+}
+
+
+std::optional<Point> project_point_onto_path(const Point& p, const Path& path) {
+    if(path.size() < 1)
+        return std::nullopt;
+
+    std::optional<Point> projected_point;
+    double closest_point_distance = INFINITY;
+    std::vector<Point> candidates;
+    for(int i = 1; i < path.size(); i++){
+        const LineCoeffs coef = line_from_two_points(path[i-1], path[i]);
+        const Point p_proj = project_points_onto_line(coef, {p})[0];
+        if(point_on_segment(p_proj, path[i-1], path[i]))
+            candidates.push_back(p_proj);
+    }
+
+    if(!candidates.empty()) {
+        const auto distances = points_to_point_distances(candidates, p);
+        const auto argmin_it = std::min_element(distances.begin(), distances.end());
+        return candidates[ std::distance(distances.begin(), argmin_it) ];
+    }
+    // else: none of the projections is actually on the path
+    // -> find the closest path point
+
+    const auto distances = points_to_point_distances(path, p);
+    const auto argmin_it = std::min_element(distances.begin(), distances.end());
+    return path[ std::distance(distances.begin(), argmin_it) ];
+}
+
+
+Path crop_path_to_aoi(const Path& path, const AreaOfInterestRect& aoi) {
+    if(path.empty())
+        return {};
+
+    const Path polygon = polygon_from_aoi(aoi);
+    const std::vector<bool> mask = points_in_polygon(path, polygon);
+
+    Path output;
+    if(mask[0])
+        output.push_back(path[0]);
+
+    // iterate in pairs of points, if one is inside the other outside, then
+    // compute the intersection to the polygon
+    for(int i = 1; i < mask.size(); i++) {
+        if(mask[i-1] != mask[i]) {
+            const std::optional<Point> expect_intersection = 
+                line_segment_polygon_intersection(path[i-1], path[i], polygon);
+            if(expect_intersection)
+                output.push_back(expect_intersection.value());
+        }
+
+        if(mask[i])
+            output.push_back(path[i]);
+    }
+    return output;
+}
+
+std::optional<PathPair> 
+crop_path_pair_to_aoi(const PathPair& pp, const AreaOfInterestRect& aoi) {
+    const uint32_t n = pp.first.size();
+    // assuming pp.second has the same size
+    if(n == 0)
+        return std::nullopt;
+    
+    const Path polygon = polygon_from_aoi(aoi);
+    const Path& path0  = pp.first;
+    const Path& path1  = pp.second;
+    const std::vector<bool> mask0 = points_in_polygon(path0, polygon);
+    const std::vector<bool> mask1 = points_in_polygon(path1, polygon);
+
+
+    Path output_path0, output_path1;
+    std::optional<Point> path0_p;
+    std::optional<Point> path1_p;
+    for(int i = 0; i < n; i++) {
+        // in last iteration i0 == i1
+        const int i0 = i;
+        const int i1 = std::min(i+1, (int)n-1);
+
+        if(!path0_p && mask0[i0])
+            path0_p = path0[i0];
+        else if(!path0_p && mask0[i1])
+            // path intersects aoi from outside to inside
+            // compute intersection and use this as the point
+            path0_p = 
+                line_segment_polygon_intersection(path0[i0], path0[i1], polygon);
+
+        if(!path1_p && mask1[i0])
+            path1_p = path1[i0];
+        else if(!path1_p && mask1[i1])
+            // path intersects aoi from outside to inside
+            // compute intersection and use this as the point
+            path1_p = 
+                line_segment_polygon_intersection(path1[i0], path1[i1], polygon);
+        
+
+        if(path0_p && !path1_p)
+                // point of the other path is outside aoi, project onto polygon
+                path1_p = project_point_onto_path(path1[i0], polygon);
+        else if(path1_p && !path0_p)
+                // point of the other path is outside aoi, project onto polygon
+                path0_p = project_point_onto_path(path0[i0], polygon);
+
+        if(path0_p && path1_p) {
+            output_path0.push_back(path0_p.value());
+            output_path1.push_back(path1_p.value());
+        }
+
+        // for the next iteration, check if there is another intersection
+        path0_p = std::nullopt;
+        path1_p = std::nullopt;
+        if(mask0[i0] && !mask0[i1])
+            // path intersects aoi from inside to outside
+            // compute intersection and use this as the next point
+            path0_p = 
+                line_segment_polygon_intersection(path0[i0], path0[i1], polygon);
+            
+        if(mask1[i0] && !mask1[i1])
+            // path intersects aoi from inside to outside
+            // compute intersection and use this as the next point
+            path1_p = 
+                line_segment_polygon_intersection(path1[i0], path1[i1], polygon);
+    }
+
+    if(output_path0.empty())
+        return std::nullopt;
+
+    return PathPair{ output_path0, output_path1 };
+}
+
+
+PairedPaths crop_paired_paths_to_aoi(
+    const PairedPaths& paths, 
+    const AreaOfInterestRect& aoi
+) {
+    PairedPaths output;
+    for(const PathPair& pathpair: paths) {
+        const auto expect_pathpair = crop_path_pair_to_aoi(pathpair, aoi);
+        if(expect_pathpair)
+            output.push_back( expect_pathpair.value() );
+    }
+    return output;
+}
 
 
 
@@ -1001,6 +1192,7 @@ postprocess_treeringmapfile(
     // shape: height first, width second
     const ImageShape& workshape,
     const ImageShape& og_shape,
+    const std::optional<AreaOfInterestRect> aoi,
     // flag to skip resizing mask, takes too long in the browser
     bool do_not_resize_to_og_shape
 ) {
@@ -1036,6 +1228,10 @@ postprocess_treeringmapfile(
             )
         );
     
+    PairedPaths paired_paths_aoi = 
+        aoi.has_value()
+        ? crop_paired_paths_to_aoi(paired_paths, aoi.value())
+        : paired_paths;
 
     // TODO: ring_areas = [treering_area(*rp) for rp in ring_points]
 
@@ -1067,8 +1263,10 @@ postprocess_treeringmapfile(
     return TreeringsPostprocessingResult{
         /*treeringmap_workshape_png = */ treeringmap_workshape_png,
         /*treeringmap_og_shape_png  = */ treeringmap_og_shape_png,
-        /*ring_points_xy            = */ paired_paths
+        /*ring_points_xy            = */ paired_paths,
+        /*ring_points_in_aoi_xy     = */ paired_paths_aoi
     };
 }
+
 
 

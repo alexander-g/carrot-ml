@@ -34,6 +34,14 @@ Paths segmentation_to_paths(
     double min_length
 );
 
+/** Remove paths/parts of paths outside the specified area of interest */
+PairedPaths crop_paired_paths_to_aoi(
+    const PairedPaths& paths, 
+    const AreaOfInterestRect& aoi
+);
+
+
+
 struct TreeringsPostprocessingResult {
     /** Treeringmap in the size that was used to process it. Encoded as PNG. */
     Buffer_p treeringmap_workshape_png;
@@ -44,6 +52,8 @@ struct TreeringsPostprocessingResult {
     // scaled to og_shape
     PairedPaths ring_points_xy;
 
+    /** Same ring points but only those inside the provided area of interest */
+    PairedPaths ring_points_in_aoi_xy;
 };
 
 std::expected<TreeringsPostprocessingResult, std::string> 
@@ -54,6 +64,7 @@ postprocess_treeringmapfile(
     // shape: height first, width second
     const ImageShape& workshape,
     const ImageShape& og_shape,
+    const std::optional<AreaOfInterestRect> aoi = std::nullopt,
     // flag to skip resizing mask, takes too long in the browser
     bool do_not_resize_to_og_shape = false
 );

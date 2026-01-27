@@ -1,5 +1,6 @@
 #pragma once
 
+#include <expected>
 #include <string>
 #include <vector>
 
@@ -17,3 +18,5 @@ Buffer_p serialize_list_of_indices2d_as_rle(const ListOfIndices2D& list);
 
 std::expected<std::vector<RLERun> , std::string> 
 deserialize_list_of_rle(const uint8_t* data, uint32_t nbytes);
+
+std::expected<AreaOfInterestRect, std::string>  parse_aoi_json(const std::string&);

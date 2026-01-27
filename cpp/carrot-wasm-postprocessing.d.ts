@@ -1,10 +1,12 @@
 
 
+/** 2D-point. x coordinate first, y second */
 export type Point       = [number, number];
 export type Path        = Point[];
 export type PathPair    = [Path, Path];
 export type PairedPaths = PathPair[];
 export type ImageSize   = {width: number, height:number};
+export type AreaOfInterest = [Point, Point, Point, Point];
 
 
 export type TreeringPostprocessingResult = {
@@ -14,7 +16,11 @@ export type TreeringPostprocessingResult = {
     /** Binary map with treerings of the size of original input image, as PNG */
     treeringmap_og_shape_png:  File|null;
 
+    /** Coordinates of the detected tree rings */
     ring_points_xy: PairedPaths;
+
+    /** Area of interest, of null for full image. Passed through from input. */
+    aoi: AreaOfInterest|null;
 
     /** For internal type checking to differentiate from other result types */
     _type: "treerings";
@@ -77,6 +83,7 @@ export declare class CARROT_Postprocessing {
         treeringmap: File|null,
         work_size:   ImageSize,
         og_size:     ImageSize,
+        aoi?:        AreaOfInterest,
     ): Promise<PostprocessingResult|Error>;
 
     /** Resize a binary png file to a specified size. */

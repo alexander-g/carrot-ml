@@ -30,6 +30,13 @@ struct Box {
 };
 
 
+struct AreaOfInterestRect {
+    Point p0, p1, p2, p3;
+};
+
+/** Test if point p lies on the line segment a - b */
+bool point_on_segment(const Point& p, const Point& a, const Point& b);
+
 /** Test if points lie inside of a polygon */
 std::vector<bool> points_in_polygon(const Points& points, const Path& polygon);
 

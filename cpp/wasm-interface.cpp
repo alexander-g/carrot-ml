@@ -16,6 +16,7 @@ enum Errors_WASM {
     POSTPROCESSING_CELLMAPFILE_FAILED     = -102,
     POSTPROCESSING_COMBINED_FAILED        = -103,
     NEITHER_TREERINGSMAP_NOR_CELLMAP_PROVIDED = -104,
+    PARSING_AOI_JSON_FAILED               = -105,
     PNG_ENCODING_FAILED                   = -110,
 
     UNEXPECTED      = -998,
@@ -47,6 +48,9 @@ int postprocess_combined_wasm(
     uint32_t    workshape_height,
     uint32_t    og_shape_width,
     uint32_t    og_shape_height,
+    // area-of-interest points, as [number, number][] json, can be null
+    const uint8_t* aoi_json_p,
+    uint32_t       aoi_json_size,
     // outputs
     uint8_t**   cellmap_workshape_png_pp,
     uint32_t*   cellmap_workshape_png_size_p,
@@ -104,12 +108,24 @@ int postprocess_combined_wasm(
     std::expected<TreeringsPostprocessingResult, std::string> expect_output_rings = 
         std::unexpected("not initialized");
     if(have_treeringmap){ 
+        std::optional<AreaOfInterestRect> area_of_interest = std::nullopt;
+        if(aoi_json_p != nullptr && aoi_json_size > 0){
+            const std::string aoi_json((const char*)aoi_json_p, aoi_json_size);
+            const auto expect_aoi = parse_aoi_json(aoi_json);
+            if(!expect_aoi){
+                *returncode = PARSING_AOI_JSON_FAILED;
+                return *returncode;
+            }
+            area_of_interest = expect_aoi.value();
+        }
+        
         expect_output_rings = postprocess_treeringmapfile(
             treeringmap_filesize, 
             treeringmap_read_file_callback_p, 
             treeringmap_read_file_callback_handle, 
             {workshape_height, workshape_width},
             {og_shape_height,  og_shape_width},
+            area_of_interest,
             /* do_not_resize_to_og_shape = */ true
         );
         if(!expect_output_rings){
@@ -126,7 +142,7 @@ int postprocess_combined_wasm(
         const CellsPostprocessingResult& output_cells = *expect_output_cells;
         const TreeringsPostprocessingResult& output_rings = *expect_output_rings;
         expect_output_combined = postprocess_combined(
-            output_rings.ring_points_xy, 
+            output_rings.ring_points_in_aoi_xy, 
             output_cells.cells, 
             {workshape_height, workshape_width},
             {og_shape_height,  og_shape_width}

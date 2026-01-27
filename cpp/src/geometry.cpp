@@ -7,12 +7,12 @@
 
 
 
-static inline double cross2d(const Point &a, const Point &b, const Point &c) {
+static inline double cross2d(const Point& a, const Point& b, const Point& c) {
     // cross product of AB x AC (z-component)
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 }
 
-inline bool point_on_segment(const Point &p, const Point &a, const Point &b) {
+bool point_on_segment(const Point& p, const Point& a, const Point& b) {
     // Check collinearity and that p is between a and b (inclusive).
     const double eps = 1e-12;
     if (std::fabs(cross2d(a, b, p)) > eps) 
