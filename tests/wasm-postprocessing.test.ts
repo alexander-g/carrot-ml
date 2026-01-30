@@ -178,6 +178,7 @@ Deno.test('postprocess_combined-with-aoi', async () => {
     asserts.assert('ringmap_workshape_png' in output1)
 
     asserts.assertGreater(output1.cell_info.length, 0)
+    asserts.assertEquals(output1.ring_points_xy.length, 2)
 
 })
 
