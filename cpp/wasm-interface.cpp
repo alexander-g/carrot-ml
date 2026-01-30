@@ -209,7 +209,7 @@ int postprocess_combined_wasm(
 
         // NOTE 2 self: must be non-const for std::move to work
         std::string ring_points_json = 
-            paired_paths_to_json(output_rings.ring_points_xy);
+            paired_paths_to_json(output_rings.ring_points_in_aoi_xy);
 
         *ring_points_xy_json_pp = (uint8_t*)ring_points_json.c_str();
         *ring_points_xy_json_size_p = ring_points_json.size();
