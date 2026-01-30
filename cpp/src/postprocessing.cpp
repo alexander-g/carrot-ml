@@ -1131,13 +1131,15 @@ crop_path_pair_to_aoi(const PathPair& pp, const AreaOfInterestRect& aoi) {
                 line_segment_polygon_intersection(path1[i0], path1[i1], polygon);
         
 
-        if(path0_p && !path1_p)
-                // point of the other path is outside aoi, project onto polygon
-                path1_p = project_point_onto_path(path1[i0], polygon);
-        else if(path1_p && !path0_p)
-                // point of the other path is outside aoi, project onto polygon
-                path0_p = project_point_onto_path(path0[i0], polygon);
+        // if(path0_p && !path1_p)
+        //         // point of the other path is outside aoi, project onto polygon
+        //         path1_p = project_point_onto_path(path1[i0], polygon);
+        // else if(path1_p && !path0_p){
+        //         // point of the other path is outside aoi, project onto polygon
+        //         path0_p = project_point_onto_path(path0[i0], polygon);
+        // }
 
+        
         if(path0_p && path1_p) {
             output_path0.push_back(path0_p.value());
             output_path1.push_back(path1_p.value());
