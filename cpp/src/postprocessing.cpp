@@ -143,23 +143,22 @@ std::optional<LineCoeffs> line_from_endpoint(
 
 /** Evaluate the equation ax + by + c.*/
 double eval_implicit_equation(const LineCoeffs& coef, const Point& p) {
-    const Vector normcoef = normalize({coef.a, coef.b});
-    return p[0] * normcoef[0]  +  p[1] * normcoef[1]  +  coef.c;
+    //const Vector normcoef = normalize({coef.a, coef.b});
+    //return p[0] * normcoef[0]  +  p[1] * normcoef[1]  +  coef.c;
+    return p[0] * coef.a  +  p[1] * coef.b  +  coef.c;
 }
 
 /** Rotate a line by 90° counter-clockwise so that it goes through point `p` */
 LineCoeffs rotate_ccw(const LineCoeffs& coef, const Point& p) {
-    const double a = -coef.b;
-    const double b =  coef.a;
-    const double c = -(p[0] * a  +  p[1] * b);
-    return LineCoeffs{a, b, c};
+    const Vector ab = normalize({-coef.b, coef.a});
+    const double c = -(p[0] * ab[0]  +  p[1] * ab[1]);
+    return LineCoeffs{ab[0], ab[1], c};
 }
 
 LineCoeffs rotate_cw(const LineCoeffs& coef, const Point& p) {
-    const double a =  coef.b;
-    const double b = -coef.a;
-    const double c = -(p[0] * a + p[1] * b);
-    return LineCoeffs{a, b, c};
+    const Vector ab = normalize({coef.b, -coef.a});
+    const double c = -(p[0] * ab[0] + p[1] * ab[1]);
+    return LineCoeffs{ab[0], ab[1], c};
 }
 
 
@@ -495,8 +494,9 @@ std::optional<int> find_next_boundary(
     const Path&  path, 
     bool         reverse
 ) {
+    const int resample_n = 25;
     const Points sampled_points = 
-        sample_points_on_path(path, 25+1).value_or(Points{});
+        sample_points_on_path(path, resample_n + 1).value_or(Points{});
     std::vector<int> sampled_path_indices;
     
     for(int i = 0; i < sampled_points.size() - 1; i++){
@@ -531,6 +531,11 @@ std::optional<int> find_next_boundary(
         
         if(closest_path_index)
             sampled_path_indices.push_back(closest_path_index.value());
+
+        const auto expect_most_common = 
+            most_common_if_unambiguous(sampled_path_indices, resample_n);
+        if(expect_most_common)
+            return expect_most_common.value();
     }
 
     if(sampled_path_indices.size() == 0)
