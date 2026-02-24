@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 
 
@@ -39,7 +40,9 @@ std::vector<T> slice_vector(const std::vector<T>& v, size_t start, size_t len){
 
 /** Compute the average of vector elements */
 template<typename T>
-std::optional<double> mean(std::vector<T> x) {
+std::optional<double> mean(const std::vector<T>& x) {
+    if(x.empty())
+        return std::nullopt;
     return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
 }
 
@@ -80,6 +83,48 @@ std::optional<T> most_common(const std::vector<T>& v) {
             best = it;
     return best->first;
 }
+
+
+/** Find the most common element in a vector, when the vector is not yet fully 
+    filled up. std::nullopt if the most common element might still change. */
+template<class T>
+std::optional<T> most_common_if_unambiguous(
+    const std::vector<T>& v, 
+    size_t future_max_size
+) {
+    if(v.empty())
+        return std::nullopt;
+
+    std::unordered_map<T, std::size_t> frequencies;
+    frequencies.reserve(v.size());
+    for(const T& x: v)
+        frequencies[x]++;
+
+    // find current leader and runner-up counts
+    int leader_value = 0;
+    size_t leader_count = 0;
+    size_t runner_up_count = 0;
+    for(const auto& [value, count]: frequencies) {
+        if (count > leader_count) {
+            runner_up_count = leader_count;
+            leader_count = count;
+            leader_value = value;
+        } else if (count > runner_up_count)
+            runner_up_count = count;
+    }
+
+    // remaining slots that could be filled in the future
+    size_t remaining = 0;
+    if(future_max_size > v.size())
+        remaining = future_max_size - v.size();
+
+    // determine if leader is already unambiguous
+    if(runner_up_count + remaining < leader_count)
+        return leader_value;
+    return std::nullopt;
+}
+
+
 
 /** Concatenate two ranges */
 template<std::ranges::input_range R1, std::ranges::input_range R2>

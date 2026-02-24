@@ -15,6 +15,7 @@
 #include "./wasm-big-image/src/util.hpp"
 
 #include "./src/image-utils.hpp"
+#include "./src/geometry.hpp"
 #include "./src/postprocessing.hpp"
 #include "./src/postprocessing_cells.hpp"
 #include "./src/pybind-utils.hpp"
@@ -107,6 +108,14 @@ py::list crop_paired_paths_to_aoi_py(
     return vec_paired_paths_to_numpy(output);
 }
 
+py::list rdp_line_simplification_py(
+    const py_f64_array path_py,
+    double epsilon
+) {
+    const Path path = path_numpy_to_stdvec(path_py);
+    const Path output = rdp_line_simplification(path, epsilon);
+    return path_stdvec_to_numpy(output);
+}
 
 
 py::dict postprocess_treeringmapfile_py(
@@ -303,6 +312,13 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         crop_paired_paths_to_aoi_py,
         py::arg("paired_paths"),
         py::arg("aoi")
+    );
+
+    m.def(
+        "rdp_line_simplification", 
+        rdp_line_simplification_py, 
+        py::arg("path"), 
+        py::arg("epsilon")
     );
 
     // main functions
