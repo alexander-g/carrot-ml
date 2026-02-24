@@ -15,14 +15,6 @@
 
 
 
-typedef struct LineCoeffs {
-    // x
-    double a;
-    // y
-    double b;
-    // offset
-    double c;
-} LineCoeffs;
 
 typedef std::pair<int,int> IntPair;
 
@@ -103,22 +95,6 @@ std::optional<std::vector<double>> paired_distances(
 
 
 
-/** Normalize x to unit length */
-Vector normalize(const Vector& v) {
-    double xlen = distance(v, Vector{0,0});
-    xlen = std::max({xlen, 1e-6});
-    return Vector{v[0] / xlen, v[1] / xlen};
-}
-
-
-/** Compute the coefficients of a line going through the points `p0` and `p1 */
-LineCoeffs line_from_two_points(const Point& p0, const Point& p1) {
-    const Vector direction = normalize( {p0[0] - p1[0], p0[1] - p1[1]} );
-    const Vector ortho  = {direction[1], -direction[0]};
-    const double offset = -(p0[0] * ortho[0] + p0[1] * ortho[1]);
-    return LineCoeffs{ortho[0], ortho[1], offset};
-}
-
 
 /** Compute the coefficients of a line going through an endpoint `p` 
     of a set of points*/
@@ -141,12 +117,6 @@ std::optional<LineCoeffs> line_from_endpoint(
 
 
 
-/** Evaluate the equation ax + by + c.*/
-double eval_implicit_equation(const LineCoeffs& coef, const Point& p) {
-    //const Vector normcoef = normalize({coef.a, coef.b});
-    //return p[0] * normcoef[0]  +  p[1] * normcoef[1]  +  coef.c;
-    return p[0] * coef.a  +  p[1] * coef.b  +  coef.c;
-}
 
 /** Rotate a line by 90° counter-clockwise so that it goes through point `p` */
 LineCoeffs rotate_ccw(const LineCoeffs& coef, const Point& p) {
@@ -1204,6 +1174,7 @@ postprocess_treeringmapfile(
     bool do_not_resize_to_og_shape
 ) {
     // if not png: error?
+    const auto t0 = now_ms();
 
     // non-const for std::move
     auto expect_mask_and_cc = load_binary_png_connected_components_and_resize(
@@ -1216,14 +1187,17 @@ postprocess_treeringmapfile(
         return std::unexpected(expect_mask_and_cc.error());
     const EigenBinaryMap& mask = expect_mask_and_cc->mask;
     const ListOfIndices2D& objectpixels = expect_mask_and_cc->objects;
+    const auto t1 = now_ms();
     
     const Paths simple_paths = connected_components_to_paths(objectpixels);
           Paths merged_paths = merge_paths(simple_paths, workshape);
 
     if(og_shape != workshape)
         merged_paths = scale_list_of_points(merged_paths, workshape, og_shape);
+    const auto t2 = now_ms();
 
     const std::vector<IntPair> ring_labels = associate_boundaries(merged_paths);
+    const auto t3 = now_ms();
 
     merged_paths = resample_paths(merged_paths);
     PairedPaths paired_paths;
@@ -1239,6 +1213,7 @@ postprocess_treeringmapfile(
         aoi.has_value()
         ? crop_paired_paths_to_aoi(paired_paths, aoi.value())
         : paired_paths;
+    const auto t4 = now_ms();
 
     // TODO: ring_areas = [treering_area(*rp) for rp in ring_points]
 
@@ -1266,6 +1241,9 @@ postprocess_treeringmapfile(
             return std::unexpected("PNG compression (og shape) failed");
         treeringmap_og_shape_png = expect_treeringmap_og_shape_png.value();
     } //else dont resize here, takes too long
+
+    const auto t5 = now_ms();
+    printf("RINGS TIMINGS: %.1f %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3, t5-t4);
 
     return TreeringsPostprocessingResult{
         /*treeringmap_workshape_png = */ treeringmap_workshape_png,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 
 
@@ -39,7 +40,9 @@ std::vector<T> slice_vector(const std::vector<T>& v, size_t start, size_t len){
 
 /** Compute the average of vector elements */
 template<typename T>
-std::optional<double> mean(std::vector<T> x) {
+std::optional<double> mean(const std::vector<T>& x) {
+    if(x.empty())
+        return std::nullopt;
     return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
 }
 

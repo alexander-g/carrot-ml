@@ -147,6 +147,7 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     bool do_not_resize_to_og_shape
 ) {
     // if not png: error?
+    const auto t0 = now_ms();
 
     const ImageSize worksize = 
         {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first};
@@ -163,7 +164,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     if(!expect_mask_and_cc)
         return std::unexpected(expect_mask_and_cc.error());
     const EigenBinaryMap& mask = expect_mask_and_cc->mask;
+    // non-const for std::move
     ListOfIndices2D& cell_ixs = expect_mask_and_cc->objects;
+    const auto t1 = now_ms();
 
     printf("TODO: remove small objects\n"); fflush(stdout);
 
@@ -179,6 +182,7 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
         );
     if(!instancemap_workshape_png_x)
         return std::unexpected("Failed to compress instancemap to png");
+    const auto t2 = now_ms();
 
     const std::expected<Buffer_p, int> expect_cellmap_workshape_png = 
         png_compress_image(
@@ -190,6 +194,8 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     if(!expect_cellmap_workshape_png)
         return std::unexpected("Failed to compress cellmap to png");
     const Buffer_p cellmap_workshape_png = expect_cellmap_workshape_png.value();
+    const auto t3 = now_ms();
+
 
     std::optional<Buffer_p> cellmap_og_shape_png = std::nullopt;
     if(workshape == og_shape)
@@ -206,6 +212,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const ListOfRLEComponents cells_rle = dense_to_rle_components(cell_ixs);
     const ListOfRLEComponents cells_rle_scaled = 
         scale_rle_components(cells_rle, worksize, og_size);
+
+    const auto t4 = now_ms();
+    printf("CELLS TIMINGS: %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3);
 
     
     return CellsPostprocessingResult{
@@ -231,14 +240,16 @@ std::vector<Path> polygons_from_treeringspaths(const PairedPaths& treering_paths
     std::vector<Path> output;
     output.reserve(treering_paths.size());
 
-    for(const PathPair& treering: treering_paths)
+    for(const PathPair& treering: treering_paths) {
+        Path path0 = rdp_line_simplification(treering.first, /*epsilon = */ 3);
+        Path path1 = rdp_line_simplification(treering.second, /*epsilon = */ 3);
         output.push_back(
             concat_copy(
-                treering.first,
-                std::views::reverse(treering.second)
+                std::move(path0),
+                std::views::reverse( std::move(path1) )
             )
         );
-    
+    }
     return output;
 }
 
@@ -343,6 +354,8 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     const ImageShape&  workshape,
     const ImageShape&  og_shape
 ) {
+    const auto t0 = now_ms();
+
     const int ncells = cells.size();
     const std::vector<Path> treering_polygons = 
         polygons_from_treeringspaths(treering_paths);
@@ -350,20 +363,39 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
     std::vector<CellInfo> cell_info;
     cell_info.reserve(ncells);
 
+    double dt10 = 0, dt21 = 0, dt32 = 0, dt43 = 0;
+
+
+    const ListOfRLEComponents cells_rle = 
+        dense_to_rle_components(cells, /*already_sorted = */false);
+    const ListOfIndices2D cells_outlines = rle_components_to_contour(cells_rle);
+
+
     for(int i = 0; i < ncells; i++){
+        const auto tt0 = now_ms();
         const Indices2D& cell_indices = cells[i];
         const Points cellpoints = scale_points(
             indices_to_points(cell_indices, /*center_pixel=*/false),
             workshape,
             og_shape
         );
-        const int treering = find_treering_for_cell(treering_polygons, cellpoints);
+        const Points cell_contours_scaled = scale_points(
+            indices_to_points(cells_outlines[i], /*center_pixel=*/false),
+            workshape,
+            og_shape
+        );
+
+        const auto tt1 = now_ms();
+        //const int treering = find_treering_for_cell(treering_polygons, cellpoints);
+        const int treering = find_treering_for_cell(treering_polygons, cell_contours_scaled);
+        const auto tt2 = now_ms();
 
         const double area_cell = estimate_cell_area_scaled(
             cellpoints, 
             {.width = (uint32_t)workshape.second, .height = (uint32_t)workshape.first},
             {.width = (uint32_t)og_shape.second,  .height = (uint32_t)og_shape.first}
         );
+        const auto tt3 = now_ms();
         const double position_within = 
             (treering >= 0)
             ? estimate_position_within_treering(
@@ -379,11 +411,20 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
             .area_px    = area_cell,
             .position_within = position_within
         });
+        const auto tt4 = now_ms();
+
+        dt10 += (tt1-tt0);
+        dt21 += (tt2-tt1);
+        dt32 += (tt3-tt2);
+        dt43 += (tt4-tt3);
     }
+    const auto t1 = now_ms();
 
     const auto expect_ringmap = colorize_ringmap(cells, cell_info, workshape);
     if(!expect_ringmap)
         return std::unexpected("Unexpected error");
+    const auto t2 = now_ms();
+
     const std::expected<Buffer_p, int> expect_ringmap_workshape_png = 
         png_compress_image(
             expect_ringmap->data(), 
@@ -393,6 +434,10 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
         );
     if(!expect_ringmap_workshape_png)
         return std::unexpected("Failed to compress instancemap to png");
+
+    const auto t3 = now_ms();
+    printf("COMBINED TIMINGS: %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2);
+    printf("LOOP: %.1f %.1f %.1f %.1f \n", dt10, dt21, dt32, dt43);
 
     return CombinedPostprocessingResult{cell_info, *expect_ringmap_workshape_png};
 }

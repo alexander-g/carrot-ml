@@ -570,3 +570,49 @@ def test_crop_paired_paths_to_aoi():
     # assert np.allclose(output2[0][0], ppaths2[0][0][:3])
 
 
+
+def test_rdp_line_simplification():
+    path0 = np.array([
+        ( 0, 0),  # keep
+        ( 1, 1),  # remove
+        ( 2, 2),  # remove
+        ( 5, 5),  # remove
+        ( 9, 9),  # remove
+        (11,10),  # remove
+        (12,12),  # remove
+        (40,40),  # keep
+        (41,39),  # remove
+        (42,38),  # remove
+        (50,30),  # remove
+        (60,20),  # remove
+        (80, 0),  # keep
+        (81, 1),  # remove
+        (82, 2),  # remove
+        (85, 5),  # remove
+        (90,10),  # keep
+        (91, 9),  # remove
+        (95, 5),  # remove
+        (100,0),  # keep 
+    ])
+    expected0 = np.array([
+        ( 0, 0),
+        (40,40),
+        (80, 0),
+        (90,10),
+        (100,0),
+    ])
+
+    output0 = postp.rdp_line_simplification(path0, epsilon=3)
+    assert np.all(output0 == expected0)
+
+
+    path1 = path0[:1]
+    output1 = postp.rdp_line_simplification(path1, epsilon=3)
+    assert np.all(output1 == path1)
+
+    path2 = path0[ [0,4] ]
+    output2 = postp.rdp_line_simplification(path2, epsilon=3)
+    assert np.all(output2 == path2)
+
+
+

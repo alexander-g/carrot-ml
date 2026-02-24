@@ -3,6 +3,25 @@
 #include <limits>
 
 #include "./geometry.hpp"
+#include "./utils.hpp"
+
+
+
+/** Normalize x to unit length */
+Vector normalize(const Vector& v) {
+    double xlen = distance(v, Vector{0,0});
+    xlen = std::max({xlen, 1e-6});
+    return Vector{v[0] / xlen, v[1] / xlen};
+}
+
+
+/** Compute the coefficients of a line going through the points `p0` and `p1 */
+LineCoeffs line_from_two_points(const Point& p0, const Point& p1) {
+    const Vector direction = normalize( {p0[0] - p1[0], p0[1] - p1[1]} );
+    const Vector ortho  = {direction[1], -direction[0]};
+    const double offset = -(p0[0] * ortho[0] + p0[1] * ortho[1]);
+    return LineCoeffs{ortho[0], ortho[1], offset};
+}
 
 
 
@@ -146,4 +165,66 @@ Points indices_to_points(const Indices2D& indices, bool center_pixel){
     return points;
 }
 
+
+std::vector<double> points_to_line_distances(
+    Points::const_iterator begin, 
+    Points::const_iterator end,
+    const LineCoeffs& line
+) {
+    std::vector<double> output;
+    output.reserve(std::distance(begin, end));
+
+    for(Points::const_iterator it = begin; it < end; it++)
+        output.push_back(
+            abs(eval_implicit_equation(line, *it))
+        );
+    return output;
+}
+
+std::vector<double> points_to_line_distances(
+    const Points&     points, 
+    const LineCoeffs& line
+) {
+    return points_to_line_distances(points.begin(), points.end(), line);
+}
+
+
+Path rdp_line_simplification(const Path& path, double epsilon) {
+    if(path.size() <= 2)
+        return path;
+
+    std::vector<Path::const_iterator> simplified_path_points;
+    simplified_path_points.reserve( (size_t)(path.size() / 2) );
+
+    std::vector<std::pair<Path::const_iterator, Path::const_iterator>> stack;
+    stack.push_back({ path.begin(), path.end() - 1 });
+    simplified_path_points.push_back( path.begin() );
+    simplified_path_points.push_back( path.end() - 1 );
+
+    while(!stack.empty()) {
+        const auto pointpair = stack.back();
+        stack.pop_back();
+
+        const LineCoeffs line = 
+            line_from_two_points(*pointpair.first, *pointpair.second);
+        const std::vector<double> distances = 
+            points_to_line_distances(pointpair.first, pointpair.second+1, line);
+
+        const auto argmax_it = std::max_element(distances.begin(), distances.end());
+        if(argmax_it != distances.end() && *argmax_it >= epsilon) {
+            const Path::const_iterator point_it = 
+                pointpair.first + std::distance(distances.begin(), argmax_it);
+            stack.push_back( { pointpair.first, point_it } );
+            stack.push_back( { point_it, pointpair.second } );
+
+            simplified_path_points.push_back( point_it );
+        }
+    }
+    std::sort(simplified_path_points.begin(), simplified_path_points.end());
+    
+    Path output;
+    for(const auto it: simplified_path_points)
+        output.push_back(*it);
+    return output;
+}
 
