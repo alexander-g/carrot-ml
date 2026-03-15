@@ -17,8 +17,6 @@
 typedef Eigen::Tensor<int, 2, Eigen::RowMajor>     EigenIntMap;
 typedef Eigen::Tensor<uint8_t, 3, Eigen::RowMajor> EigenRGBMap;
 
-#define HARDCODED_MIN_OBJECT_SIZE 10
-
 
 /** Convert HSV to RGB. H in range 0-360, S & V in range 0-100 */
 std::array<uint8_t, 3> hsv_to_rgb(float h, float s, float v) {
@@ -153,7 +151,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const ImageShape& workshape,
     const ImageShape& og_shape,
     // flag to skip resizing mask, takes too long in the browser
-    bool do_not_resize_to_og_shape
+    bool do_not_resize_to_og_shape,
+    // filter out cells below this number of pixels (in workshape)
+    uint32_t min_object_size
 ) {
     // if not png: error?
     const auto t0 = now_ms();
@@ -176,7 +176,7 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     // non-const for std::move
     //ListOfIndices2D& cell_ixs = expect_mask_and_cc->objects;
     ListOfIndices2D cell_ixs = 
-        remove_small_objects(expect_mask_and_cc->objects, HARDCODED_MIN_OBJECT_SIZE);
+        remove_small_objects(expect_mask_and_cc->objects, min_object_size);
     const auto t1 = now_ms();
 
 

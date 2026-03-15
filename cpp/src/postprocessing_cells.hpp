@@ -32,7 +32,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const ImageShape& workshape,
     const ImageShape& og_shape,
     // flag to skip resizing mask, takes too long in the browser
-    bool do_not_resize_to_og_shape = false
+    bool do_not_resize_to_og_shape = false,
+    // filter out cells below this number of pixels (in workshape)
+    uint32_t min_object_size = 10
 );
 
 

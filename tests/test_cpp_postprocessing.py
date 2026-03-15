@@ -340,7 +340,7 @@ def test_postprocessing_combined():
 
     workshape = (777,777)
     og_shape  = mask.shape
-    output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape)
+    output = postp.postprocess_combined(cellmapfile, treeringfile, workshape, og_shape, min_object_size=5)
 
     assert len( output['cell_info'] ) == expected_n_cells
 
