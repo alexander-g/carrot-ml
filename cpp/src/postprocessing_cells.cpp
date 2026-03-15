@@ -18,7 +18,6 @@ typedef Eigen::Tensor<int, 2, Eigen::RowMajor>     EigenIntMap;
 typedef Eigen::Tensor<uint8_t, 3, Eigen::RowMajor> EigenRGBMap;
 
 
-
 /** Convert HSV to RGB. H in range 0-360, S & V in range 0-100 */
 std::array<uint8_t, 3> hsv_to_rgb(float h, float s, float v) {
     h = fmodf(h, 360);
@@ -119,7 +118,15 @@ std::optional<EigenRGBMap> colorize_ringmap(
 
 
 
-
+ListOfIndices2D remove_small_objects(const ListOfIndices2D& cells, int threshold){
+    ListOfIndices2D output;
+    output.reserve(cells.size());
+    for(const auto& cell: cells) {
+        if(cell.size() > threshold)
+            output.push_back(cell);
+    }
+    return output;
+}
 
 
 
@@ -144,7 +151,9 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
     const ImageShape& workshape,
     const ImageShape& og_shape,
     // flag to skip resizing mask, takes too long in the browser
-    bool do_not_resize_to_og_shape
+    bool do_not_resize_to_og_shape,
+    // filter out cells below this number of pixels (in workshape)
+    uint32_t min_object_size
 ) {
     // if not png: error?
     const auto t0 = now_ms();
@@ -165,10 +174,11 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
         return std::unexpected(expect_mask_and_cc.error());
     const EigenBinaryMap& mask = expect_mask_and_cc->mask;
     // non-const for std::move
-    ListOfIndices2D& cell_ixs = expect_mask_and_cc->objects;
+    //ListOfIndices2D& cell_ixs = expect_mask_and_cc->objects;
+    ListOfIndices2D cell_ixs = 
+        remove_small_objects(expect_mask_and_cc->objects, min_object_size);
     const auto t1 = now_ms();
 
-    printf("TODO: remove small objects\n"); fflush(stdout);
 
     const ImageShape shape{mask.dimension(0), mask.dimension(1)};
     const EigenRGBMap instancemap_rgb = colorize_instancemap(cell_ixs, shape);
@@ -184,13 +194,8 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
         return std::unexpected("Failed to compress instancemap to png");
     const auto t2 = now_ms();
 
-    const std::expected<Buffer_p, int> expect_cellmap_workshape_png = 
-        png_compress_image(
-            to_uint8_p(mask.data()), 
-            /*width=*/    mask.dimension(1),
-            /*height=*/   mask.dimension(0),
-            /*channels=*/ 1
-        );
+    const std::expected<Buffer_p, std::string> expect_cellmap_workshape_png = 
+        rasterize_cell_indices_and_encode_as_png(cell_ixs, worksize, worksize);
     if(!expect_cellmap_workshape_png)
         return std::unexpected("Failed to compress cellmap to png");
     const Buffer_p cellmap_workshape_png = expect_cellmap_workshape_png.value();

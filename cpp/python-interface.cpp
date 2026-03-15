@@ -190,7 +190,8 @@ py::dict postprocess_combined_from_files_py(
     const std::string& treeringmappath,
     const ImageShape& workshape, 
     const ImageShape& og_shape,
-    const std::optional<py_f64_array> aoi_py = std::nullopt
+    const std::optional<py_f64_array> aoi_py = std::nullopt,
+    const std::optional<uint32_t> min_object_size_py = std::nullopt
 ) {
     const auto expect_fhandle_cells = FileHandle::open(cellmappath.c_str());
     const auto expect_fhandle_rings = FileHandle::open(treeringmappath.c_str());
@@ -204,13 +205,16 @@ py::dict postprocess_combined_from_files_py(
     std::optional<AreaOfInterestRect> aoi = std::nullopt;
     if(aoi_py)
         aoi = py_aoi_to_cpp(aoi_py.value());
+    const uint32_t min_object_size = min_object_size_py.value_or(10);
 
     const auto expect_output_cells = postprocess_cellmapfile(
         fhandle_cells->size, 
         (const void*) &fhandle_cells->read_callback, 
         (void*) fhandle_cells, 
         workshape,
-        og_shape
+        og_shape,
+        /*do_not_resize_to_og_shape=*/false,
+        min_object_size
     );
     if(!expect_output_cells)
         throw std::runtime_error(
@@ -346,7 +350,8 @@ PYBIND11_MODULE(carrot_postprocessing_ext, m) {
         py::arg("treeringmappath").noconvert(),
         py::arg("workshape"),
         py::arg("og_shape"),
-        py::arg("aoi") = std::nullopt
+        py::arg("aoi") = std::nullopt,
+        py::arg("min_object_size") = std::nullopt
     );
     
 }
