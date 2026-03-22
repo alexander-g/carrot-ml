@@ -41,8 +41,6 @@ jobs:
 
   build-wasm:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v3
         with:
@@ -81,20 +79,32 @@ jobs:
             cpp/carrot-wasm-postprocessing.d.ts
           if-no-files-found: error
 
+  release-wasm:
+    needs:   build-wasm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: ${{ github.event.inputs.release-wasm == 'true' }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: modules
+          path: artifact/
+
       - name: Release
-        if: ${{ github.event.inputs.release-wasm == 'true' }}
         run: |
           TAGNAME=v$(date +%F)
           echo $TAGNAME
-          # note: backup file before git checkout
-          mkdir tmp
-          cp cpp/carrot-wasm-postprocessing.d.ts tmp/
-          cp cpp/build-wasm/bundle/carrot-wasm-postprocessing.js tmp/
-          #
+
           git fetch origin wasm-releases
           git checkout wasm-releases
-          cp tmp/* ./
-          rm -r tmp
+          cp artifact/carrot-wasm-postprocessing.d.ts ./
+          cp artifact/build-wasm/bundle/carrot-wasm-postprocessing.js ./
+          rm -r artifact
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add ./carrot-wasm-postprocessing.*
