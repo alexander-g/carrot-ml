@@ -620,6 +620,62 @@ double path_length(const Path& path) {
     return output;
 }
 
+/** Fill the shorter path by duplicating points based on arc length */
+void match_path_lengths_by_arclength(Path& path0, Path& path1) {
+    if(path0.size() == path1.size())
+        return;
+
+    if(path0.empty() || path1.empty())
+        return;
+
+    Path* shorter = &path0;
+    Path* longer  = &path1;
+    if(path0.size() > path1.size())
+        std::swap(shorter, longer);
+
+    const auto compute_relative_positions = [](const Path& path) {
+        std::vector<double> positions;
+        positions.reserve(path.size());
+        positions.push_back(0.0);
+
+        double accumulated = 0.0;
+        for(int i = 1; i < path.size(); i++) {
+            accumulated += distance(path[i - 1], path[i]);
+            positions.push_back(accumulated);
+        }
+
+        if(accumulated <= 0.0)
+            return positions;
+
+        for(double& value: positions)
+            value /= accumulated;
+
+        return positions;
+    };
+
+    const std::vector<double> shorter_positions =
+        compute_relative_positions(*shorter);
+    const std::vector<double> longer_positions =
+        compute_relative_positions(*longer);
+
+    Path output;
+    output.reserve(longer->size());
+
+    size_t shorter_index = 0;
+    for(const double t: longer_positions) {
+        while(
+            shorter_index + 1 < shorter_positions.size()
+            && std::abs(shorter_positions[shorter_index + 1] - t)
+                <= std::abs(shorter_positions[shorter_index] - t)
+        )
+            shorter_index++;
+
+        output.push_back((*shorter)[shorter_index]);
+    }
+
+    *shorter = output;
+}
+
 Point interpolate_points(const Point& p0, const Point& p1, double alpha) {
     const Vector direction = {p1[0] - p0[0], p1[1] - p0[1]};
     return { 
@@ -674,40 +730,91 @@ Paths resample_paths(const Paths& paths) {
 }
 
 
+/** Find slice size to approximate target path length. */
+int path_slice_size_for_targetlength(
+    const Path& path,
+    int start_index,
+    double targetlength
+) {
+    if(path.empty())
+        return 0;
+
+    if(start_index < 0)
+        start_index = 0;
+    if(start_index >= path.size())
+        return 0;
+    if(targetlength <= 0.0)
+        return 1;
+
+    double accumulated_length = 0.0;
+    int size = 1;
+    double last_accumulated_length = 0.0;
+    int last_size = 1;
+    for(int i = start_index; i < path.size() - 1; i++) {
+        last_accumulated_length = accumulated_length;
+        last_size = size;
+
+        accumulated_length += distance(path[i], path[i + 1]);
+        size++;
+
+        if(accumulated_length >= targetlength) {
+            const double over  = accumulated_length - targetlength;
+            const double under = targetlength - last_accumulated_length;
+            if(under <= over)
+                return last_size;
+            return size;
+        }
+    }
+    return size;
+}
+
 
 /** Group points from path 0 to corresponding points from path 1 */
 PathPair associate_pathpoints(const Path& path0, const Path& path1) {
-    Path resampledpath0 = path0, resampledpath1 = path1;
+    Path path0_copy = path0, path1_copy = path1;
 
-    const bool flipped = (resampledpath0.size() < resampledpath1.size());
+    const double length0 = path_length(path0_copy);
+    const double length1 = path_length(path1_copy);
+
+    const bool flipped = (length0 < length1);
     if(flipped)
-        std::swap(resampledpath0, resampledpath1);
+        std::swap(path0_copy, path1_copy);
 
+    const double targetlength = std::min(length0, length1);
 
     // find best offset
     double best_mean_distance = INFINITY;
     std::optional<int> best_offset = std::nullopt;
-    for(int i = 0; i < resampledpath0.size() - resampledpath1.size() +1; i++) {
-        const auto slicedpath0 = 
-            slice_vector(resampledpath0, i, resampledpath1.size());
-        const auto distances = paired_distances(slicedpath0, resampledpath1);
+    std::optional<Path> best_path0 = std::nullopt;
+    std::optional<Path> best_path1 = std::nullopt;
+    for(int i = 0; i < path0_copy.size(); i++) {
+        const int slice_size_i = 
+            path_slice_size_for_targetlength(path0_copy, i, targetlength);
+
+        auto slicedpath0 = slice_vector(path0_copy, i, slice_size_i);
+        match_path_lengths_by_arclength(slicedpath0, path1_copy);
+
+        const auto distances = paired_distances(slicedpath0, path1_copy);
         if(distances){
             const double mean_distance = *mean( *distances );
             if(mean_distance < best_mean_distance){
                 best_mean_distance = mean_distance;
                 best_offset = i;
+
+                best_path0 = slicedpath0;
+                best_path1 = path1_copy;
             }
         }
     }
     // should be always true
-    if(best_offset)
-        resampledpath0 = 
-            slice_vector(resampledpath0, *best_offset, resampledpath1.size());
+    // if(best_offset)
+    //     path0_copy = 
+    //         slice_vector(path0_copy, *best_offset, path1_copy.size());
 
     if(flipped)
-        std::swap(resampledpath0, resampledpath1);
+        std::swap(best_path0, best_path1);
 
-    return {resampledpath0, resampledpath1};
+    return {best_path0.value(), best_path1.value()};
 }
 
 
@@ -1252,6 +1359,3 @@ postprocess_treeringmapfile(
         /*ring_points_in_aoi_xy     = */ paired_paths_aoi
     };
 }
-
-
-

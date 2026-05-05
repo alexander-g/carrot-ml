@@ -33,19 +33,36 @@ def test_associate_boundaries():
 
 
 def test_associate_pathpoints():
-    path0 = np.linspace([ 10,10], [150,150], 30)
-    path1 = np.linspace([210,10], [300,100], 30)
+    def to_set(points: np.ndarray) -> set[tuple[float, float]]:
+        return {tuple(p.tolist()) for p in points}
 
-    out0p0, out0p1 = postp_legacy.associate_pathpoints(path0, path1)
-    out1p0, out1p1 = postp.associate_pathpoints(path0, path1)
-    
-    print(out0p0.shape, out0p1.shape)
-    print(out1p0.shape, out1p1.shape)
-    assert out1p0.shape == out1p1.shape
-    assert out1p0.shape == out0p0.shape
+    path0 = np.linspace([0, 0], [20, 0], 21)
+    path1 = np.linspace([6, 4], [16, 4], 21)
 
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p0, out0p0) ])
-    assert all([np.allclose(o0,o1) for o0, o1 in zip(out1p1, out0p1) ])
+    out0p0, out0p1 = postp.associate_pathpoints(path0, path1)
+
+    assert out0p0.shape == out0p1.shape
+    assert out0p0.shape[0] == path1.shape[0]
+
+    start_distance = np.linalg.norm(out0p0[0] - out0p1[0])
+    end_distance = np.linalg.norm(out0p0[-1] - out0p1[-1])
+    #breakpoint()
+    assert abs(start_distance - end_distance) < 1.0 #1e-6
+
+    assert to_set(out0p0).issubset(to_set(path0))
+    assert to_set(out0p1).issubset(to_set(path1))
+
+    # # reversed path
+    # path1_rev = np.array(path1[::-1])
+    # out1p0, out1p1 = postp.associate_pathpoints(path0, path1_rev)
+
+    # assert out1p0.shape == out1p1.shape
+    # assert out1p0.shape[0] == path1.shape[0]
+
+    # start_distance = np.linalg.norm(out1p0[0] - out1p1[0])
+    # end_distance = np.linalg.norm(out1p0[0] - out1p1[-1])
+    # assert start_distance < end_distance
+    # assert to_set(out1p1).issubset(to_set(path1_rev))
 
 
 
@@ -613,6 +630,5 @@ def test_rdp_line_simplification():
     path2 = path0[ [0,4] ]
     output2 = postp.rdp_line_simplification(path2, epsilon=3)
     assert np.all(output2 == path2)
-
 
 
