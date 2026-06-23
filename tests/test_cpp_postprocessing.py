@@ -52,6 +52,10 @@ def test_associate_pathpoints():
     assert to_set(out0p0).issubset(to_set(path0))
     assert to_set(out0p1).issubset(to_set(path1))
 
+    # empty, dont fail
+    out1p0, out1p1 = postp.associate_pathpoints(path0[:0], path1)
+    out2p0, out2p1 = postp.associate_pathpoints(path0, path1[:0])
+
     # # reversed path
     # path1_rev = np.array(path1[::-1])
     # out1p0, out1p1 = postp.associate_pathpoints(path0, path1_rev)
@@ -229,7 +233,17 @@ def test_postprocess_treeringmapfile4_very_long():
     assert len(out4['ring_points_xy']) > 60
     
 
+# bug
+def test_postprocess_treeringsmapfile5_no_zero_length_paths():
+    treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap5.png' )
 
+    workshape = (1412, 14163)
+    og_shape  = (5342, 53584)
+
+    out5 = postp.postprocess_treeringmapfile(treeringfile, workshape, og_shape)
+    for path0, path1 in out5['ring_points_xy']:
+        assert np.sum( np.abs( np.diff(path0, axis=0) ) ) > 0
+        assert np.sum( np.abs( np.diff(path1, axis=0) ) ) > 0
 
 
 def test_postprocess_cellmapfile():
