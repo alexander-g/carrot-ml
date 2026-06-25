@@ -6,4 +6,4 @@ pillow==11.3.0
 scipy==1.16.2
 torch==2.9.0
 torchvision==0.24.0
-#-e git+https://github.com/alexander-g/traininglib@8ab4990baad22e9c74d58050c627acaf74ff44f3#egg=traininglib
+#-e git+https://github.com/alexander-g/traininglib@803d8c38c7cdb5dfc2422daf2d125c74013bfe9f#egg=traininglib

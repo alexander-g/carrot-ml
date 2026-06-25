@@ -185,6 +185,9 @@ class TreeringsDataset(PatchedCachingDataset):
         target = datalib.load_image(targetfile, mode='L')
         return input, target
 
+    def collate_fn(self, raw_batch: RawBatch):
+        return raw_batch
+
 
 
 #TODO: merge with cells model
