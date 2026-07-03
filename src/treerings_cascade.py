@@ -37,7 +37,6 @@ class Cascade_TreeringsModule(torch.nn.Module):
 
 
 RawBatch = tp.List[ tp.Tuple[torch.Tensor, torch.Tensor] ]
-PreparedBatch = tp.Tuple[torch.Tensor, torch.Tensor]
 
 class CascadeTrainStep(SaveableModule):
     def __init__(self, module:Cascade_TreeringsModule, inputsize:int):
@@ -47,7 +46,7 @@ class CascadeTrainStep(SaveableModule):
         self._device_indicator = torch.nn.Parameter(torch.empty(0))
 
     def forward(self, raw_batch:RawBatch):
-        x,t = prepare_batch(
+        x,t_stage0 = prepare_batch(
             raw_batch,
             augment   = True,
             patchsize = self.inputsize,
@@ -59,30 +58,75 @@ class CascadeTrainStep(SaveableModule):
         # reverse order
         y0 = y[:,1][:,None]
         y1 = y[:,0][:,None]
+        yx = y0.sigmoid() + y1.sigmoid()
+
+        t_stage1 = estimate_mistakes(t_stage0.bool(), (y0.detach() > 0))
 
 
         bce_fn = torch.nn.functional.binary_cross_entropy_with_logits
         
-        bce0    = bce_fn(y0, t)
-        mgn0    = margin_loss_multilabel(y0, t.bool(), logits=True)
+        bce0    = bce_fn(y0, t_stage0)
+        mgn0    = margin_loss_multilabel(y0, t_stage0.bool(), logits=True)
         loss0   = bce0 + mgn0 * 0.1
 
-        bce1    = bce_fn(y1, t)
-        mgn1    = margin_loss_multilabel(y1, t.bool(), logits=True)
+        bce1    = bce_fn(y1, t_stage1)
+        mgn1    = margin_loss_multilabel(y1, t_stage1.bool(), logits=True)
         loss1   = bce1 + mgn1 * 0.1
 
         loss = loss0 + loss1
 
-        recall0 = (y0 > 0.0)[t > 0].float().mean()
-        recall1 = (y1 > 0.0)[t > 0].float().mean()
+        recall0 = (y0 > 0.0)[t_stage0 > 0].float().mean()
+        recall1 = (y1 > 0.0)[t_stage1 > 0].float().mean()
+        recallx = (yx > 0.5)[t_stage0 > 0].float().mean()
+
         
         logs = { 
             'loss0': float(loss0), 
             'loss1': float(loss1),  
             'rec0':  float(recall0), 
-            'rec1':  float(recall1) 
+            'rec1':  float(recall1),
+            'recx':  float(recallx),
         }
         return loss, logs
+
+
+
+def pad_to_kernelsize(x:torch.Tensor, k:int):
+    W = x.shape[-2]
+    H = x.shape[-1]
+
+    pad_x = k - (W % k)
+    pad_y = k - (H % k)
+
+    x = torch.nn.functional.pad(x, [0, pad_y, 0, pad_x])
+    return x
+
+
+def dilate_mask(x:torch.Tensor, k:int) -> torch.Tensor:
+    '''Fast and dirty dilation via max pooling'''
+    assert x.dtype == torch.bool
+    H = x.shape[-2]
+    W = x.shape[-1]
+
+    x = torch.nn.functional.max_pool2d(
+        pad_to_kernelsize(x, k).float(),
+        kernel_size = k, 
+        stride = k, 
+    )
+    x = torch.nn.functional.interpolate(x, scale_factor=k, mode='nearest')
+    x = x[..., :H, :W].bool()
+    return x
+
+
+
+def estimate_mistakes(annotations:torch.Tensor, outputs:torch.Tensor):
+    assert annotations.dtype == torch.bool
+    assert outputs.dtype == torch.bool
+
+    outputs_dilated = dilate_mask(outputs, k=40)
+    mistakes = annotations & (~outputs_dilated)
+    return mistakes.float()
+
 
 
 
@@ -99,6 +143,12 @@ if __name__ == '__main__':
 
     batch = list(zip(x,t))
 
+    import time
+    
+    t0 = time.time()
     loss, logs = step(batch)
+    t1 = time.time()
+    
     print(logs)
+    print(t1-t0)
 
