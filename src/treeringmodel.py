@@ -82,15 +82,20 @@ class TreeringsTrainStep(SaveableModule):
 class TreeringsDataset(PatchedCachingDataset):
     def __init__(
         self, 
-        filepairs: tp.List[tp.Tuple[str,str]], 
-        patchsize: int, 
-        px_per_mm: float, 
-        cachedir:  str = './cache/',
+        filepairs:        tp.List[tp.Tuple[str,str]], 
+        patchsize:        int, 
+        px_per_mm:        float, 
+        target_px_per_mm: float = HARDCODED_GOOD_RESOLUTION,
+        dilation:         int   = 0,
+        cachedir:         str   = './cache/',
     ):
-        scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
-        super().__init__(filepairs, patchsize, scale, cachedir=cachedir)
-        self.items = self.filepairs
-        self.items = self._preprocess_treeringmaps(self.filepairs)
+        scale = target_px_per_mm / px_per_mm
+        # NOTE: scale=1 because the interpolation mode='nearest' is suboptimal
+        super().__init__(filepairs, int(np.ceil(patchsize/scale)), scale=1.0, cachedir=cachedir)
+        
+        # resizing to patchsize afterwards here:
+        self.items = self._preprocess_treeringmaps(self.filepairs, patchsize, dilation)
+        self._resize_inputs_to_inputsize(patchsize)
     
     @classmethod
     def from_splitfile(cls, splitfile:str, *a, **kw):
@@ -101,8 +106,11 @@ class TreeringsDataset(PatchedCachingDataset):
     def _preprocess_treeringmaps(
         self, 
         filepairs: tp.List[tp.Tuple[str,str]], 
+        inputsize: int,
+        dilation:  int = 0,
     ):
-        '''Normalize annotations'''
+        '''Normalize annotations: 
+           resize to input size, skeletonize, dilate to common width'''
         new_cachefile = os.path.join(self.cachedir, 'cachefile2.csv')
         if os.path.exists(new_cachefile):
             return datalib.load_file_pairs(new_cachefile)
@@ -113,8 +121,20 @@ class TreeringsDataset(PatchedCachingDataset):
         new_target_patches: tp.List[str] = []
         for i, anf in enumerate(targetfiles):
             basename = os.path.basename(anf)
-            an = datalib.load_image(anf, mode='L')[0] > 0.5
+            an = datalib.load_image(anf, mode='L') > 0.5
+            if an.shape[-2] > inputsize *2 or an.shape[-1] > inputsize *2:
+                # intermediate resize to avoid losing thin lines
+                intermediate_size = (
+                    int( (an.shape[-2] + inputsize)/2 ), 
+                    int( (an.shape[-1] + inputsize)/2 )
+                )
+                an = datalib.resize_tensor(an.float(), intermediate_size, mode='bilinear')
+            an = datalib.resize_tensor(an.float(), size=inputsize, mode='bilinear')
+            an = (an > 0.0)[0]
             skeleton = skmorph.skeletonize(an.numpy())
+            if dilation > 0:
+                skeleton = skmorph.dilation(skeleton, skmorph.disk(dilation))
+            
             targetfile = os.path.join(cachedir, basename+f'.skel.png')
             datalib.write_image_tensor(targetfile, torch.as_tensor(skeleton))
             new_target_patches.append(targetfile)
@@ -122,62 +142,19 @@ class TreeringsDataset(PatchedCachingDataset):
         # sanity check
         assert len(new_target_patches) == len(self)
     
-        input_patches = [inf for inf,_ in self.items]
+        input_patches = [inf for inf,_ in self.filepairs]
         new_items     = list( zip(input_patches, new_target_patches) )
         datalib.save_file_tuples(new_cachefile, new_items)
 
         return new_items
-
-
-    # def _preprocess_treeringmaps(
-    #     self, 
-    #     filepairs: tp.List[tp.Tuple[str,str]], 
-    # ):
-    #     '''Perform sanity checks and normalize annotations'''
-    #     new_cachefile = os.path.join(self.cachedir, 'cachefile2.csv')
-    #     if os.path.exists(new_cachefile):
-    #         return datalib.load_file_pairs(new_cachefile)
-
-    #     targetfiles = [anf for _,anf in filepairs]
-    #     cachedir = os.path.join(self.cachedir, 'targets')
-
-    #     new_target_patches: tp.List[str] = []
-    #     for i, anf in enumerate(targetfiles):
-    #         basename = os.path.basename(anf)
-    #         output = treeringlib.postprocess_treeringmapfile(anf, (100,100) )
-    #         paths_yx:tp.List[np.ndarray]  = \
-    #             [rp[0] for rp in output.ring_points_yx] \
-    #             + [output.ring_points_yx[-1][1]]
-            
-    #         # TODO: should check if len(paths) == number of connected components
-    #         # TODO: will fail if there is only a single ring boundary
-            
-    #         for j, gridcell in enumerate(self.grids[i].reshape(-1,4)):
-    #             paths_yx_i = [
-    #                 (p * self.scale) - gridcell[:2] for p in paths_yx
-    #             ]
-    #             paths_xy_i = [ p[:,::-1].copy() for p in paths_yx_i ]
-
-    #             # re-rasterize to normalize annotations
-    #             size = (gridcell[-2:] - gridcell[:2])[::-1].tolist()
-    #             heatmap = utils.rasterize_multiple_paths_batched(
-    #                 utils.encode_numpy_paths(paths_xy_i, 0), 
-    #                 n_batches  = 1, 
-    #                 size       = size, 
-    #                 stepfactor = 2.0,
-    #             ).float()[0]
-    #             heatmap_file = os.path.join(cachedir, basename+f'.{j:03n}.png')
-    #             datalib.write_image_tensor(heatmap_file, heatmap)
-    #             new_target_patches.append(heatmap_file)
-
-    #     # sanity check
-    #     assert len(new_target_patches) == len(self)
     
-    #     input_patches = [inf for inf,_ in self.items]
-    #     new_items     = list( zip(input_patches, new_target_patches) )
-    #     datalib.save_file_tuples(new_cachefile, new_items)
-    
-    #     return new_items
+    def _resize_inputs_to_inputsize(self, inputsize:int):
+        inputfiles = [inf for inf,_ in self.items]
+        for i, inf in enumerate(inputfiles):
+            x = datalib.load_image(inf, mode='RGB')
+            x = datalib.resize_tensor(x, size=inputsize, mode='bilinear')
+            datalib.write_image_tensor(inf, x)
+
     
     def __getitem__(self, i:int):
         inputfile, targetfile = self.items[i]

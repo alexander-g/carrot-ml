@@ -194,7 +194,11 @@ def exclude_border_instances(instancemap:torch.Tensor) -> torch.Tensor:
 
 
 
-def masks_to_instancemap(masks:torch.Tensor, threshold:float=0.5) -> torch.Tensor:
+def masks_to_instancemap(
+    masks:           torch.Tensor, 
+    threshold:       float = 0.5,
+    remove_overlaps: bool = False,
+) -> torch.Tensor:
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
        int32 instancemap, with each instance having a unique value'''
     assert masks.ndim == 4 and masks.shape[1] == 1
@@ -202,6 +206,9 @@ def masks_to_instancemap(masks:torch.Tensor, threshold:float=0.5) -> torch.Tenso
         return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
+    if remove_overlaps:
+        overlaps = (masks.sum(dim=0, keepdims=True) > 1)
+        masks    = masks * ~overlaps
     instancelabels = \
         torch.arange(1, len(masks)+1, device=masks.device, dtype=torch.int32)
     instances = (masks * instancelabels[:,None,None]).max(0)[0]
