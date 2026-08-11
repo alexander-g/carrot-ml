@@ -4,3 +4,6 @@
 [submodule "cpp/wasm-big-image"]
 	path = cpp/wasm-big-image
 	url = https://github.com/alexander-g/wasm-big-image
+[submodule "ultralytics"]
+	path = ultralytics
+	url = https://github.com/alexander-g/ultralytics
