@@ -56,7 +56,7 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
         og_shape = page.shape
-    H,W,C = og_shape
+    H,W = og_shape[:2]
     C = 3 
     newshape = [ C, int(H * scale), int(W * scale) ]
     result = torch.zeros(newshape, dtype=torch.uint8)
@@ -66,7 +66,9 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     except ValueError:
         # cannot memmap if compressed
         with tifffile.TiffFile(path) as tif:
-            imdata = tif.pages[0].asarray()  # type: ignore
+            imdata = tif.pages[0].asarray()  # type: ignore[assignment]
+    if len(imdata.shape) == 2:
+        imdata = imdata[..., None] # type: ignore[assignment]
 
     for i in range(0, H, patchsize):
         for j in range(0, W, patchsize):
