@@ -178,7 +178,7 @@ def train_yolo_on_treerings(
 
 
 model_yaml = '''
-# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+# Ultralytics  AGPL-3.0 License - https://ultralytics.com/license
 
 # Ultralytics YOLO26 semantic segmentation model with P3/8 and P4/16 head inputs
 # Model docs: https://docs.ultralytics.com/models/yolo26
