@@ -17,10 +17,13 @@ def main(args:args.Namespace):
 
     if args.pretrained is None:
         print('No pretrained model provided.')
-    carrotmodel = train_yolo_on_treerings(dataset_yaml, epochs=args.epochs, inputsize=args.inputsize, weightsfile=args.pretrained, verbose=True)
-    #carrotmodel.save()
-
-    breakpoint()
+    carrotmodel = train_yolo_on_treerings(
+        dataset_yaml, 
+        epochs      = args.epochs, 
+        inputsize   = args.inputsize, 
+        weightsfile = args.pretrained, 
+        verbose     = True
+    )
 
 
 

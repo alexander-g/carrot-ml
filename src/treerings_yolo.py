@@ -60,13 +60,15 @@ def create_dataset_for_yolo(
     splitfile: str, 
     patchsize: int, 
     px_per_mm: float, 
-    outputdir: str
+    outputdir: str,
+    target_px_per_mm: float|None = None
 ) -> str:
+    target_px_per_mm = target_px_per_mm or HARDCODED_GOOD_RESOLUTION
     dataset = TreeringsDataset.from_splitfile(
         splitfile, 
         patchsize        = patchsize, 
         px_per_mm        = px_per_mm,
-        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
+        target_px_per_mm = target_px_per_mm,
         dilation         = 2,
         cachedir         = outputdir,
     )
@@ -125,6 +127,7 @@ def train_yolo_on_treerings(
     progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
     verbose:      bool = False,
     outputdir:    str = 'checkpoints/',
+    target_px_per_mm: float|None = None,
 ):
     assert outputdir is not None, 'outputdir currently required'
     outputdir = os.path.abspath(outputdir)
@@ -168,11 +171,13 @@ def train_yolo_on_treerings(
     best_pt = os.path.join(outputdir, run_name, 'weights', 'best.pt')
     model = ultralytics.YOLO(best_pt)
 
-
-    module = TreeringsYOLO_Module(model, px_per_mm=HARDCODED_GOOD_RESOLUTION).eval()
+    target_px_per_mm = target_px_per_mm or HARDCODED_GOOD_RESOLUTION
+    module = TreeringsYOLO_Module(model, px_per_mm=target_px_per_mm).eval()
     carrotmodel = \
         TreeringsYOLO_CARROT(TreeringsInference(module, patchsize=inputsize))
-    # carrotmodel.save
+    
+    savepath = os.path.join(outputdir, run_name, 'weights', f'{run_name}.pt.zip')
+    carrotmodel.save(savepath)
     return carrotmodel
 
 

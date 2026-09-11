@@ -42,7 +42,8 @@ from .util import load_and_scale_image
 
 # assuming 10-250um cell sizes, this results in 10-250px
 #HARDCODED_GOOD_RESOLUTION = 1000   # px/mm
-HARDCODED_GOOD_RESOLUTION = 500   # px/mm
+HARDCODED_GOOD_RESOLUTION = 750   # px/mm
+# HARDCODED_GOOD_RESOLUTION = 500   # px/mm
 
 HARDCODED_MIN_CELLSIZE_UM = 10
 HARDCODED_MIN_CELLSIZE_PX = \
@@ -231,6 +232,7 @@ def train_yolo_on_cells(
         verbose = verbose,
         project = outputdir,
         name    = run_name,
+        mask_ratio = 2,
     )
 
     # re-creating yolo, because it contains some crap
@@ -241,7 +243,6 @@ def train_yolo_on_cells(
     module.inputsize = inputsize
     carrotmodel = CellsYOLO_CARROT(module)
     return carrotmodel
-
 
 
 

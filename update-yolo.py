@@ -19,7 +19,7 @@ def update(args:argparse.Namespace):
 
     if args.model.endswith('.pt'):
         m = ultralytics.YOLO(args.model)  # type: ignore[attr-defined]
-        assert args.px_per_mm is not None
+        assert args.px_per_mm is not None, '--px-per-mm required for raw YOLO files'
 
         if m.args['task'] == 'segment':
             CARROT_cls = CellsYOLO_CARROT
@@ -47,10 +47,12 @@ def update(args:argparse.Namespace):
 
     carrotmodule = CARROT_cls(inference)    # type: ignore
 
-    filename  = os.path.splitext(os.path.basename(args.model))[0] + '.carrot.pt.zip'
-    outputdir = args.outputdir or os.path.dirname(args.model)
-    os.makedirs(outputdir, exist_ok=True)
-    outputpath = os.path.join(outputdir, filename)
+    # filename  = os.path.splitext(os.path.basename(args.model))[0] + '.carrot.pt.zip'
+    # outputdir = args.outputdir or os.path.dirname(args.model)
+    # os.makedirs(outputdir, exist_ok=True)
+    # outputpath = os.path.join(outputdir, filename)
+    outputpath = args.outputpath
+    os.makedirs(os.path.dirname(outputpath), exist_ok=True)
     print(f'Saving to {outputpath}')
         
     carrotmodule.save(outputpath)
@@ -61,7 +63,7 @@ def get_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=update.__doc__)
     parser.add_argument('--model', required=True, help='Path to a yolo .pt model')
     parser.add_argument('--px-per-mm', type=float)
-    parser.add_argument('--outputdir', type=str)
+    parser.add_argument('--outputpath', type=str)
     return parser
 
 if __name__ == '__main__':

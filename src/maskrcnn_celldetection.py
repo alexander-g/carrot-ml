@@ -202,16 +202,19 @@ def masks_to_instancemap(
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
        int32 instancemap, with each instance having a unique value'''
     assert masks.ndim == 4 and masks.shape[1] == 1
-    if len(masks) == 0:
+    # NOTE: need .shape[0] instead of len() for onnx
+    n = masks.shape[0]
+    if n == 0:
         return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
     if remove_overlaps:
         overlaps = (masks.sum(dim=0, keepdims=True) > 1)
         masks    = masks * ~overlaps
+    
     instancelabels = \
-        torch.arange(1, len(masks)+1, device=masks.device, dtype=torch.int32)
-    instances = (masks * instancelabels[:,None,None]).max(0)[0]
+        torch.arange(1, n+1, device=masks.device, dtype=torch.int32)
+    instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
     return instances
 
 
