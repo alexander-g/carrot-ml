@@ -152,6 +152,27 @@ Deno.test('cellmapfile5', async () => {
 })
 
 
+// edge cases
+Deno.test('all-black-all-white', async () => {
+    const module = await initialize();
+
+    const worksize = {width: 800, height: 800}
+    const og_size = {width: 800, height: 800}
+
+    for(const filename of ['white.png', 'black.png']){
+        const filepath1 = import.meta.resolve(`./assets/${filename}`).replace('file://','')
+        const cellmapfile1 = new File([Deno.readFileSync(filepath1)], 'cellmap.png')
+    
+        const output1 = await module.postprocess_combined(cellmapfile1, null, worksize, og_size)
+        console.log(output1)
+        asserts.assertNotInstanceOf(output1, Error, filename)
+    
+        const output2 = await module.postprocess_combined(null, cellmapfile1, worksize, og_size)
+        asserts.assertNotInstanceOf(output2, Error, filename)
+    }
+})
+
+
 
 
 
