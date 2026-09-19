@@ -241,6 +241,10 @@ class InstanceDataset(CC_CellsDataset):
         input  = datalib.load_image(inputfile)
         target = datalib.load_image(targetfile, mode='L', normalize=False).long()
         return input, target
+    
+    # NOTE: override for a more recent traininglib change
+    def collate_fn(self, raw_batch:RawBatch) -> RawBatch:
+        return raw_batch
 
 
 class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
@@ -282,17 +286,17 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
             grid, 
             self.slack
         )
-        classmap = delineate_instancemap(instancemap).cpu().numpy()
+        classmap = delineate_instancemap(instancemap)
 
         if outputshape is None:
             outputshape = og_shape
         full_output = datalib.resize_tensor2(
-            instancemap[None].float(), 
+            classmap[None].float(), 
             outputshape, 
             'nearest'
-        )[0].to(instancemap.dtype)
+        )[0].to(classmap.dtype)
         
-        return classmap
+        return full_output.cpu().numpy()
 
     
     def prepare(self, x:torch.Tensor, px_per_mm:float):

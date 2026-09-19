@@ -50,13 +50,12 @@ def load_and_scale_image(path:str, scale:float = 1.0) -> ImageAndOGShape:
         x = x.permute(1,2,0)
         return x, (H,W)
 
-
 def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndOGShape:
     '''Load and scale a tiff image, patchwise to reduce memory'''
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
         og_shape = page.shape
-    H,W,C = og_shape
+    H,W = og_shape[:2]
     C = 3 
     newshape = [ C, int(H * scale), int(W * scale) ]
     result = torch.zeros(newshape, dtype=torch.uint8)
@@ -66,7 +65,9 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
     except ValueError:
         # cannot memmap if compressed
         with tifffile.TiffFile(path) as tif:
-            imdata = tif.pages[0].asarray()  # type: ignore
+            imdata = tif.pages[0].asarray()  # type: ignore[assignment]
+    if len(imdata.shape) == 2:
+        imdata = imdata[..., None] # type: ignore[assignment]
 
     for i in range(0, H, patchsize):
         for j in range(0, W, patchsize):
@@ -74,11 +75,17 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
                 imdata[i:i+patchsize, j:j+patchsize]
             ).permute(2,0,1)
             h,w = patch.shape[-2:]
-            newpatchshape = ( int(h * scale), int(w * scale) )
+
+            i_ = int(i * scale)
+            j_ = int(j * scale)
+            i__ = min(int((i + h) * scale), result.shape[1])
+            j__ = min(int((j + w) * scale), result.shape[2])
+
+            newpatchshape = (i__ - i_, j__ - j_)
             patch = resize_tensor(patch, newpatchshape, 'bilinear')
-            i_ = int(i*scale)
-            j_ = int(j*scale)
-            result[:, i_:i_+patch.shape[-2], j_:j_+patch.shape[-1]] = patch[:3]
+
+            result[:, i_:i__, j_:j__] = patch[:3]
+
     result = result.permute(1,2,0)
     return result, (H,W)
 
