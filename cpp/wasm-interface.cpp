@@ -210,14 +210,17 @@ int postprocess_combined_wasm(
 
         // NOTE 2 self: must be non-const for std::move to work
         std::string ring_points_json = 
-            //paired_paths_to_json(output_rings.ring_points_xy);
             paired_paths_to_json(output_rings.ring_points_in_aoi_xy);
+        // move to a shared pointer before taking the pointer c_str()
+        // otherwise the pointer might get invalidated when moving into closure
+        std::shared_ptr<std::string> ring_points_json_sp = 
+            std::make_shared<std::string>(std::move(ring_points_json));
 
-        *ring_points_xy_json_pp = (uint8_t*)ring_points_json.c_str();
-        *ring_points_xy_json_size_p = ring_points_json.size();
+        *ring_points_xy_json_pp = (uint8_t*)ring_points_json_sp->c_str();
+        *ring_points_xy_json_size_p = ring_points_json_sp->size();
         wasm_output_storage.emplace(
             (void*)ring_points_xy_json_pp, 
-            [x = std::move(ring_points_json)]() mutable { /* no-op */ } 
+            [x = std::move(ring_points_json_sp)]() mutable { /* no-op */ } 
         );
         wasm_output_storage.emplace(
             (void*)treeringmap_workshape_png_pp, 
@@ -253,14 +256,19 @@ int postprocess_combined_wasm(
 
         // NOTE: must be non-const for std::move to work
         std::string cell_info_json = cell_info_to_json(output_combined.cell_info);
+        // move to a shared pointer before taking the pointer c_str()
+        // otherwise the pointer might get invalidated when moving into closure
+        std::shared_ptr<std::string> cell_info_json_sp = 
+            std::make_shared<std::string>(std::move(cell_info_json));
 
-        *cell_info_json_pp = (uint8_t*)cell_info_json.c_str();
-        *cell_info_json_size_p = cell_info_json.size();
+
+        *cell_info_json_pp = (uint8_t*)cell_info_json_sp->c_str();
+        *cell_info_json_size_p = cell_info_json_sp->size();
 
         
         wasm_output_storage.emplace(
             (void*)cell_info_json_pp, 
-            [x = std::move(cell_info_json)]() mutable { /* no-op */ } 
+            [x = std::move(cell_info_json_sp)]() mutable { /* no-op */ } 
         );
         wasm_output_storage.emplace(
             (void*)ringmap_workshape_png_pp, 

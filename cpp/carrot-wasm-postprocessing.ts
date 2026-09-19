@@ -557,7 +557,10 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
         const buffer_p:pointer = this.wasm.HEAP32[buffer_pp >> 2]!;
         const size:number = Number(this.wasm.HEAP64[size_p >> 3]);
-        if(buffer_p == 0 || size == 0)
+        if(size == 0)
+            // when size is zero, buffer is allowed to be a nullpointer
+            return new Uint8Array(0);
+        if(buffer_p == 0)
             return null;
 
         const data_u8:Uint8Array<ArrayBuffer> = this.wasm.HEAPU8.slice(

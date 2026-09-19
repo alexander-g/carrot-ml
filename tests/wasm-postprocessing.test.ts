@@ -161,14 +161,16 @@ Deno.test('all-black-all-white', async () => {
 
     for(const filename of ['white.png', 'black.png']){
         const filepath1 = import.meta.resolve(`./assets/${filename}`).replace('file://','')
-        const cellmapfile1 = new File([Deno.readFileSync(filepath1)], 'cellmap.png')
+        const file1 = new File([Deno.readFileSync(filepath1)], filename)
     
-        const output1 = await module.postprocess_combined(cellmapfile1, null, worksize, og_size)
-        console.log(output1)
+        const output1 = await module.postprocess_combined(file1, null, worksize, og_size)
         asserts.assertNotInstanceOf(output1, Error, filename)
     
-        const output2 = await module.postprocess_combined(null, cellmapfile1, worksize, og_size)
+        const output2 = await module.postprocess_combined(null, file1, worksize, og_size)
         asserts.assertNotInstanceOf(output2, Error, filename)
+
+        const output3 = await module.postprocess_combined(file1, file1, worksize, og_size)
+        asserts.assertNotInstanceOf(output3, Error, filename)
     }
 })
 
