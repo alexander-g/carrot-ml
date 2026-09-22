@@ -140,6 +140,11 @@ Deno.test('cellmapfile5', async () => {
         await module.rasterize_cell_indices_and_encode_as_png(output1.cells_serialized, og_size)
     asserts.assertNotInstanceOf(post_rasterized, Error)
 
+    if(output1.cellmap_og_shape_png instanceof File)
+        // bug: no zero-sized files please
+        // technically this should not even be a file, therefore the if()
+        asserts.assertGreater(output1.cellmap_og_shape_png.size, 0)
+
 
     // re-postprocess
     const output2 = await module.postprocess_combined(post_rasterized, null, worksize, og_size)
@@ -149,6 +154,29 @@ Deno.test('cellmapfile5', async () => {
 
     // both masks should be the same, quick test
     asserts.assertEquals(output1.cellmap_workshape_png.size, output2.cellmap_workshape_png.size)
+})
+
+
+// edge cases
+Deno.test('all-black-all-white', async () => {
+    const module = await initialize();
+
+    const worksize = {width: 800, height: 800}
+    const og_size = {width: 800, height: 800}
+
+    for(const filename of ['white.png', 'black.png']){
+        const filepath1 = import.meta.resolve(`./assets/${filename}`).replace('file://','')
+        const file1 = new File([Deno.readFileSync(filepath1)], filename)
+    
+        const output1 = await module.postprocess_combined(file1, null, worksize, og_size)
+        asserts.assertNotInstanceOf(output1, Error, filename)
+    
+        const output2 = await module.postprocess_combined(null, file1, worksize, og_size)
+        asserts.assertNotInstanceOf(output2, Error, filename)
+
+        const output3 = await module.postprocess_combined(file1, file1, worksize, og_size)
+        asserts.assertNotInstanceOf(output3, Error, filename)
+    }
 })
 
 
