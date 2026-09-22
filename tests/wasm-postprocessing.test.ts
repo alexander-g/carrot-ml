@@ -140,6 +140,11 @@ Deno.test('cellmapfile5', async () => {
         await module.rasterize_cell_indices_and_encode_as_png(output1.cells_serialized, og_size)
     asserts.assertNotInstanceOf(post_rasterized, Error)
 
+    if(output1.cellmap_og_shape_png instanceof File)
+        // bug: no zero-sized files please
+        // technically this should not even be a file, therefore the if()
+        asserts.assertGreater(output1.cellmap_og_shape_png.size, 0)
+
 
     // re-postprocess
     const output2 = await module.postprocess_combined(post_rasterized, null, worksize, og_size)
