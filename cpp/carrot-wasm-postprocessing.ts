@@ -253,7 +253,8 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
 
                 cells_serialized = this.#read_dynamic_output_buffer(
                     cell_ixs_binary_workshape_pp,
-                    cell_ixs_binary_workshape_size_p
+                    cell_ixs_binary_workshape_size_p,
+                    /*zero_size_ok = */ true,
                 )?.buffer ?? null
 
                 const instancemap_workshape_png_u8:Uint8Array<ArrayBuffer>|null 
@@ -300,7 +301,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     JSON.parse(new TextDecoder().decode(ring_points_xy_json_u8));
                 paired_paths = validate_paired_paths(obj)
                 if(paired_paths == null)
-                    return new Error('WASM-JS communication inconcistencies')
+                    return new Error('WASM-JS communication inconsistencies')
             }
 
 
@@ -322,7 +323,7 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
                     JSON.parse(new TextDecoder().decode(cell_info_json_u8));
                 cell_info = validate_cell_info_array(obj)
                 if(cell_info == null)
-                    return new Error('WASM-JS communication inconcistencies')
+                    return new Error('WASM-JS communication inconsistencies')
             }
 
             if(cellmap_workshape 
@@ -550,17 +551,21 @@ export class CARROT_Postprocessing implements ICARROT_Postprocessing {
     #dynamic_output_buffers:pointer[] = []
 
     /** Read an outputbuffer, whose size is not known in advance */
-    #read_dynamic_output_buffer(buffer_pp:pointer, size_p:pointer): 
+    #read_dynamic_output_buffer(
+        buffer_pp:    pointer, 
+        size_p:       pointer, 
+        zero_size_ok: boolean = false
+    ): 
     Uint8Array<ArrayBuffer>|null {
         if(buffer_pp == 0 || size_p == 0)
             return null;
 
         const buffer_p:pointer = this.wasm.HEAP32[buffer_pp >> 2]!;
         const size:number = Number(this.wasm.HEAP64[size_p >> 3]);
-        if(size == 0)
+        if(size == 0 && zero_size_ok)
             // when size is zero, buffer is allowed to be a nullpointer
             return new Uint8Array(0);
-        if(buffer_p == 0)
+        if(buffer_p == 0 || size == 0)
             return null;
 
         const data_u8:Uint8Array<ArrayBuffer> = this.wasm.HEAPU8.slice(
