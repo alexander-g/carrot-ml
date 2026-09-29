@@ -198,6 +198,7 @@ def masks_to_instancemap(
     masks:           torch.Tensor, 
     threshold:       float = 0.5,
     remove_overlaps: bool = False,
+    largest_only:    bool = False,
 ) -> torch.Tensor:
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
        int32 instancemap, with each instance having a unique value'''
@@ -208,6 +209,8 @@ def masks_to_instancemap(
         return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
+    if largest_only:
+        masks = keep_largest_object(masks)
     if remove_overlaps:
         overlaps = (masks.sum(dim=0, keepdims=True) > 1)
         masks    = masks * ~overlaps
@@ -217,6 +220,23 @@ def masks_to_instancemap(
     instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
     return instances
 
+
+def keep_largest_object(masks:torch.Tensor) -> torch.Tensor:
+    assert masks.ndim == 3
+    assert masks.dtype == torch.bool
+
+    kernel = np.ones([3,3], dtype=np.int32)
+    output:tp.List[torch.Tensor] = []
+    for m in masks:
+        m = m.detach().cpu()
+        labeled, n = scipy.ndimage.label(m.numpy(), kernel)
+        if n > 1:
+            uniques, counts = np.unique(labeled, return_counts=True)
+            # zero is background
+            largest_object_label = uniques[1:][counts[1:].argmax()]
+            m = torch.as_tensor(labeled == largest_object_label)
+        output.append(m)
+    return torch.stack(output).to(masks.device)
 
 
 class InstanceDataset(CC_CellsDataset):

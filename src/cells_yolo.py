@@ -107,7 +107,12 @@ class CellsYOLO_Module(torch.nn.Module):
             # remove the padding again
             masks = masks[..., :H, :W]
 
-            instancemap = masks_to_instancemap(masks[:,None], remove_overlaps=True)
+            instancemap = masks_to_instancemap(
+                masks[:,None], 
+                largest_only    = True, 
+                remove_overlaps = True,
+            )
+            # instancemap = masks_to_instancemap(masks[:,None], remove_overlaps=True)
             outputs.append({'instances': instancemap})
         return outputs
 
