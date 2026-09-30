@@ -311,20 +311,34 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 
             if progress_callback is not None:
                 progress_callback( i/n )
-        instancemap = stitch_and_relabel_instancemaps_from_grid(
+        stitched = stitch_and_relabel_instancemaps_from_grid(
             instancemap_patches, 
             grid, 
             self.slack
         )
-        classmap = delineate_instancemap(instancemap)
-
         if outputshape is None:
             outputshape = og_shape
-        full_output = datalib.resize_tensor2(
-            classmap[None].float(), 
+        
+        current_shape = stitched.shape
+        output_is_smaller = \
+            (outputshape[0] < current_shape[0]) or (outputshape[1] < current_shape[1])
+        
+        # NOTE: delineate the smaller image
+        # delineating before downsampling might reverse delineation
+        # delineating og-sized images can result in oom
+        if not output_is_smaller:
+            stitched = delineate_instancemap(stitched)
+
+        stitched = datalib.resize_tensor2(
+            # classmap[None].float(), 
+            stitched[None].float(),
             outputshape, 
             'nearest'
-        )[0].to(classmap.dtype)
+        )[0].to(stitched.dtype)
+
+        if output_is_smaller:
+            stitched = delineate_instancemap(stitched)
+        full_output = (stitched > 0)
         
         return full_output.cpu().numpy()
 
