@@ -178,6 +178,62 @@ def crop_tensor_at_boxes(
         crops = flatcrop.reshape(C, len(boxes), size, size).permute(1, 0, 2, 3)
     return crops
 
+def convert_boxmasks_into_full_result(
+    shape:  tp.Tuple[int,int], 
+    boxes:  torch.Tensor, 
+    masks:  torch.Tensor,
+) -> torch.Tensor:
+    '''Cropped output masks to a full [N,H,W] tensor with individual masks'''
+    assert boxes.ndim == 2          # [N,4] x0,y0,x1,y1
+    assert boxes.shape[1] == 4
+    assert masks.ndim == 3          # [N,H,W]
+    assert len(boxes) == len(masks)
+
+    H, W = shape
+    output = \
+        torch.zeros( (len(boxes),H,W), dtype=masks.dtype, device=masks.device )
+    if len(boxes) == 0:
+        return output
+
+    mask_h, mask_w = masks.shape[-2:]
+
+    for i, (box, mask) in enumerate(zip(boxes, masks)):
+        x0, y0, x1, y1 = box
+
+        # integer coordinates in the result that fall inside the box.
+        ix0 = max(0, int(torch.ceil(x0).item()))
+        iy0 = max(0, int(torch.ceil(y0).item()))
+        ix1 = min(W, int(torch.ceil(x1).item()))
+        iy1 = min(H, int(torch.ceil(y1).item()))
+
+        if ix0 >= ix1 or iy0 >= iy1:
+            continue
+
+        # output-space integer coordinates -> mask-space coordinates
+        ys = torch.arange(iy0, iy1, device=masks.device, dtype=boxes.dtype)
+        xs = torch.arange(ix0, ix1, device=masks.device, dtype=boxes.dtype)
+
+        yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+
+        # to -1..+1
+        gx = 2 * (xx - x0) / (x1 - x0) - 1
+        gy = 2 * (yy - y0) / (y1 - y0) - 1
+        grid = torch.stack((gx, gy), dim=-1).unsqueeze(0)
+
+        sampled = torch.nn.functional.grid_sample(
+            mask[None, None].float(),
+            grid.float(),
+            mode          = "bilinear",
+            padding_mode  = "zeros",
+            align_corners = False,
+        )[0, 0]
+
+        output[i, iy0:iy1, ix0:ix1] += sampled.to(output.dtype)
+    return output
+
+
+    
+
 
 def scale_boxes(boxes:torch.Tensor, scale:float|torch.Tensor) -> torch.Tensor:
     assert boxes.ndim == 2

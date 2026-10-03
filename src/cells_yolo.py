@@ -37,6 +37,7 @@ from .maskrcnn_celldetection import (
     InstanceDataset,
 )
 from .util import load_and_scale_image
+from .cells_yolo_maskhead import MaskHead, convert_boxmasks_into_full_result
 
 
 
@@ -63,12 +64,13 @@ YOLO26S_SEGMENT_PRETRAINED_WEIGHTS_URL = \
 
 
 class CellsYOLO_Module(torch.nn.Module):
-    def __init__(self, yolo:ultralytics.YOLO, px_per_mm:float):
+    def __init__(self, yolo:ultralytics.YOLO, maskhead:MaskHead, px_per_mm:float):
         super().__init__()
         self.yolomodel = yolo.model
         # NOTE: in list to avoid capture by torch.nn.Module
         self._yolo = [yolo]
         self.inputsize = yolo.model.args['imgsz']
+        self.maskhead = maskhead
         self.px_per_mm = px_per_mm
     
     def forward(self, x:torch.Tensor):
@@ -85,34 +87,25 @@ class CellsYOLO_Module(torch.nn.Module):
         
         outputs = []
         for i in range(B):
-            good        = confidence[i] > 0.25
-            mask_coeffs = output[0][i, good, 6:]
-            good_boxes  = boxes[i, good]
-            good_scores = confidence[i, good]
-
+            good         = confidence[i] > 0.25
+            good_boxes   = boxes[i, good]
+            good_scores  = confidence[i, good]
             keep_indices = \
                 torchvision.ops.nms(good_boxes, good_scores, iou_threshold=0.3)
             postnms_boxes = good_boxes[keep_indices]
-            mask_coeffs   = mask_coeffs[keep_indices]
 
-            proto = output[1][i]
-            masks = ultralytics.utils.ops.process_mask(
-                proto, 
-                mask_coeffs, 
-                postnms_boxes, 
-                x.shape[-2:], 
-                upsample = True
-            )  # NHW
+            boxmasks = self.maskhead(x[i][None], [postnms_boxes])[0]
 
-            # remove the padding again
-            masks = masks[..., :H, :W]
+            fullmasks = \
+                convert_boxmasks_into_full_result((H,W), postnms_boxes, boxmasks > 0)
+            fullmasks = (fullmasks > 0)
 
             instancemap = masks_to_instancemap(
-                masks[:,None], 
-                largest_only    = True, 
+                fullmasks[:,None], 
+                largest_only    = False,   # redundant with the new mask head
                 remove_overlaps = True,
             )
-            # instancemap = masks_to_instancemap(masks[:,None], remove_overlaps=True)
+
             outputs.append({'instances': instancemap})
         return outputs
 
@@ -350,37 +343,6 @@ def start_training_from_carrot(
         outputdir         = cachedir,
     )
     return carrotmodel
-
-
-    return
-
-
-
-
-if __name__ == '__main__':
-    import os
-    import glob
-    import PIL.Image
-
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/2026-07-31_cells/best.pt')
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    inputsize = m.args['imgsz']
-    print('inputsize:', inputsize)
-
-    m.model.model[-1].max_det *= 2  #useless
-    module = CellsYOLO_Module(m, px_per_mm=HARDCODED_GOOD_RESOLUTION*inputsize/800).eval()
-    model  = MaskRCNN_Cells_CARROT(module)
-
-    outputdir = 'DEBUG/2026-08-19_yolo-inference/cells-500pxpermm_4'
-    os.makedirs(outputdir, exist_ok=True)
-    for f in sorted( glob.glob('data/2026-08-21_bw-cells-500/inputs/*') ):
-        print(f)
-        output = model.process_image(f, px_per_mm=1000, progress_callback=print, batchsize=4)
-        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
-        print()
-
-    print('done')
 
 
 

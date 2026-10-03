@@ -2,6 +2,7 @@ import os
 import tempfile
 
 from src.cells_yolo import CellsYOLO_Module, CellsYOLO_Module, MaskRCNN_Cells_CARROT
+from src.cells_yolo_maskhead import MaskHead
 from src.treerings_yolo import TreeringsYOLO_Module, Treerings_CARROT, TreeringsInference
 
 import numpy as np
@@ -42,7 +43,8 @@ def test_treerings_inference():
 def test_cells_inference():
     m = ultralytics.YOLO('ultralytics/ultralytics/cfg/models/26/yolo26-seg.yaml')
     inputsize = m.args['imgsz']
-    module = CellsYOLO_Module(m, px_per_mm=250).eval()
+    head   = MaskHead()
+    module = CellsYOLO_Module(m, head, px_per_mm=250).eval()
     model  = MaskRCNN_Cells_CARROT(module)
 
 
