@@ -8,7 +8,6 @@ import torch
 import torchvision
 
 from traininglib import datalib, modellib
-from traininglib.segmentation.connectedcomponents import _relabel
 from traininglib.segmentation import (
     grid_for_patches, 
     paste_patch, 
@@ -399,6 +398,7 @@ def relabel_instancemaps(
     map1:torch.Tensor,
     overlapbox0: Box,
     overlapbox1: Box,
+    minimum_overlap_pixels:int = 8,
 ) -> torch.Tensor:
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
@@ -420,7 +420,9 @@ def relabel_instancemaps(
     overlap_uniques, overlap_counts = \
         datalib.faster_unique_dim0_with_counts(overlapping_values)
 
-    # TODO: filter out too-small overlaps
+    # filter out too-small overlaps
+    good = (overlap_counts >= minimum_overlap_pixels)
+    overlap_uniques = overlap_uniques[good]
     
     #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
     # TODO: this is a simplification, rework this properly
