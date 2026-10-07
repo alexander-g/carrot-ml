@@ -77,7 +77,12 @@ class CellsYOLO_Module(torch.nn.Module):
         self.maskhead = maskhead
         self.px_per_mm = px_per_mm
     
-    def forward(self, x:torch.Tensor):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        last_layer_tta_rounds: int = 10, 
+        last_layer_tta_noise:  float = 0.25
+    ):
         assert x.ndim == 4
         B,C,H,W = x.shape
         assert H <= self.inputsize and W <= self.inputsize, [self.inputsize, x.shape]
@@ -85,9 +90,38 @@ class CellsYOLO_Module(torch.nn.Module):
         # pad to avoid misalignment errors
         x = datalib.pad_to_minimum_size(x, self.inputsize)
 
-        output, _  = self.yolomodel(x)
+        # output, _  = self.yolomodel(x)
+        per_layer_output:tp.List = []
+        for layer_i, layer in enumerate(self.yolomodel.model):
+            if type(layer.f) == int:
+                layer_input = \
+                    per_layer_output[layer.f] if len(per_layer_output) > 0 else x
+                layer_output = layer(layer_input)
+            else:
+                # multi-input
+                layer_inputs = [per_layer_output[i] for i in layer.f]
+                layer_output = layer(layer_inputs)
+            per_layer_output.append(layer_output)
+        output, _  = per_layer_output[-1]
         boxes      = output[...,:4]
         confidence = output[..., 4]
+
+        torch.manual_seed(0)
+        augment_boxes = [boxes]
+        augment_confidence = [confidence]
+        last_layer_inputs = layer_inputs
+        for i in range(last_layer_tta_rounds):
+            noisy_last_layer_inputs = [ 
+                inp * (torch.randn_like(inp)*last_layer_tta_noise +1) 
+                    for inp in last_layer_inputs  
+            ]
+            noisy_output,_   = layer(noisy_last_layer_inputs)
+            noisy_boxes      = noisy_output[...,:4]
+            noisy_confidence = noisy_output[..., 4]
+            augment_boxes.append(noisy_boxes)
+            augment_confidence.append(noisy_confidence)
+        boxes      = torch.cat(augment_boxes, dim=1)
+        confidence = torch.cat(augment_confidence, dim=1)
         
         outputs = []
         for i in range(B):
@@ -415,6 +449,37 @@ def start_training_from_carrot(
         cachedir          = cachedir,
     )
     return carrotmodel
+
+
+
+
+if __name__ == '__main__':
+    import os
+    import glob
+    import PIL.Image
+
+    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/2026-07-31_cells/best.pt')
+    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
+    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
+    m = ultralytics.YOLO('./checkpoints/2026-09-22_17h08m01s_cells/weights/best.pt')
+    head = modellib.load_model('checkpoints/2026-10-02_13h03m47s_640px_30e_shuffle1.0-head-avgpool/2026-10-02__shuffle1.0-head-avgpool.pt.zip').module
+    inputsize = m.args['imgsz']
+    print('inputsize:', inputsize)
+
+    m.model.model[-1].max_det *= 2  #useless
+    module = CellsYOLO_Module(m, head, px_per_mm=HARDCODED_GOOD_RESOLUTION*inputsize/800).eval()
+    model  = MaskRCNN_Cells_CARROT(module)
+
+    outputdir = 'DEBUG/2026-08-19_yolo-inference/2026-10-02_cells-maskhead'
+    os.makedirs(outputdir, exist_ok=True)
+    for f in sorted( glob.glob('data/2026-08-21_bw-cells-500/inputs/*') ):
+    # for f in sorted( glob.glob('data/2026-09-05_cells-deciduous/inputs/*') ):
+        print(f)
+        output = model.process_image(f, px_per_mm=1000, progress_callback=print, batchsize=4)
+        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
+        print()
+
+    print('done')
 
 
 
