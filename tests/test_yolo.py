@@ -41,7 +41,7 @@ def test_treerings_inference():
 
 
 def test_cells_inference():
-    m = ultralytics.YOLO('ultralytics/ultralytics/cfg/models/26/yolo26-seg.yaml')
+    m = ultralytics.YOLO('ultralytics/ultralytics/cfg/models/26/yolo26.yaml')
     inputsize = m.args['imgsz']
     head   = MaskHead()
     module = CellsYOLO_Module(m, head, px_per_mm=250).eval()

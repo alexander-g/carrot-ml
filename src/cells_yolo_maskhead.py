@@ -40,7 +40,7 @@ class MaskHead(torch.nn.Module):
         
         all_crops = []
         for i, _boxes in enumerate(boxes):
-            crops = crop_tensor_at_boxes(x[i], _boxes, self.masksize, 'nearest')
+            crops = crop_tensor_at_boxes(x[i], _boxes, self.masksize, 'bilinear')
             all_crops.append(crops)
 
         y = self.module(torch.cat(all_crops))
@@ -107,7 +107,7 @@ def prepare_batch(
     augment:   bool, 
     device:    torch.device,
     masksize:  int = 64,
-    max_masks: int = 128,
+    max_masks: int = 1,
 ):
     all_images  = []
     all_boxes   = []
@@ -313,42 +313,5 @@ def box_grids(boxes: torch.Tensor, n: int) -> torch.Tensor:
 
     return torch.stack((x, y), dim=-1)  # [N, n, n, 2]
 
-
-
-
-if __name__ == '!__main__':
-    instancemap = torch.zeros([100,100], dtype=torch.int64)
-    instancemap[40:60, 50:60] = 1
-    instancemap[40,50] = 0
-    instancemap[59,59] = 0
-    instancemap[10:20, 10:20] = 2
-    instancemap[10,10] = 0
-    instancemap[18,18] = 3
-    instancemap[19,19] = 3
-
-    boxes = torch.tensor([
-        [50, 40, 60, 60],
-        [10, 10, 20, 20],
-    ]).float()
-
-    targets = instancemap_to_targets(instancemap, boxes, size=7)
-    print(targets)
-
-
-if __name__ == '__main__':
-    ds = InstanceDataset.from_splitfile('data/2026-09-05_cells-deciduous/2026-09-05_002.txt', patchsize=640, px_per_mm=1000)
-
-    raw_batch = [ ds[0], ds[100] ]
-    # x, t = prepare_batch(raw_batch, augment=True, device='cuda')
-
-
-    m = MaskHead().cuda()
-    step = MaskHeadTrainStep(m).cuda()
-    #y = m(x['images'], x['boxes'])
-    loss, logs = step(raw_batch)
-
-    breakpoint()
-
-    print('done')
 
 
