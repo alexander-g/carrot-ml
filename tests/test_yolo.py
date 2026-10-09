@@ -11,7 +11,7 @@ import PIL.Image
 
 
 def test_treerings_inference():
-    m = ultralytics.YOLO('ultralytics/ultralytics/cfg/models/26/yolo26-sem.yaml')
+    m = ultralytics.YOLO('vendor/ultralytics/ultralytics/cfg/models/26/yolo26-sem.yaml')
     inputsize = m.args['imgsz']
     module = TreeringsYOLO_Module(m, px_per_mm=250).eval()
     model  = Treerings_CARROT(TreeringsInference(module, patchsize=inputsize))
@@ -40,7 +40,7 @@ def test_treerings_inference():
 
 
 def test_cells_inference():
-    m = ultralytics.YOLO('ultralytics/ultralytics/cfg/models/26/yolo26-seg.yaml')
+    m = ultralytics.YOLO('vendor/ultralytics/ultralytics/cfg/models/26/yolo26-seg.yaml')
     inputsize = m.args['imgsz']
     module = CellsYOLO_Module(m, px_per_mm=250).eval()
     model  = MaskRCNN_Cells_CARROT(module)

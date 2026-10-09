@@ -45,3 +45,4 @@ torchvision==0.24.0
 -e git+https://github.com/alexander-g/traininglib@8921c3f195355c9182069ce82a1febb4e9d7a304#egg=traininglib
 triton==3.5.0
 typing_extensions==4.15.0
+-e git+https://github.com/alexander-g/ultralytics@78efaf3710c0fa24e25ac1f65aa68a5b02cfc9c0#egg=ultralytics
