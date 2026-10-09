@@ -31,6 +31,7 @@ pluggy==1.6.0
 protobuf==6.33.0
 Pygments==2.19.2
 pyparsing==3.3.2
+PyYAML==6.0.3
 pytest==8.4.2
 python-dateutil==2.9.0.post0
 scikit-image==0.25.2
@@ -41,6 +42,7 @@ sympy==1.14.0
 tifffile==2025.10.16
 torch==2.9.0
 torchvision==0.24.0
--e git+https://github.com/alexander-g/traininglib@8ab4990baad22e9c74d58050c627acaf74ff44f3#egg=traininglib
+-e git+https://github.com/alexander-g/traininglib@8921c3f195355c9182069ce82a1febb4e9d7a304#egg=traininglib
 triton==3.5.0
 typing_extensions==4.15.0
+-e git+https://github.com/alexander-g/ultralytics@78efaf3710c0fa24e25ac1f65aa68a5b02cfc9c0#egg=ultralytics

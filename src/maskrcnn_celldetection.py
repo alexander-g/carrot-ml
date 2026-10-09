@@ -8,7 +8,6 @@ import torch
 import torchvision
 
 from traininglib import datalib, modellib
-from traininglib.segmentation.connectedcomponents import _relabel
 from traininglib.segmentation import (
     grid_for_patches, 
     paste_patch, 
@@ -194,19 +193,49 @@ def exclude_border_instances(instancemap:torch.Tensor) -> torch.Tensor:
 
 
 
-def masks_to_instancemap(masks:torch.Tensor, threshold:float=0.5) -> torch.Tensor:
+def masks_to_instancemap(
+    masks:           torch.Tensor, 
+    threshold:       float = 0.5,
+    remove_overlaps: bool = False,
+    largest_only:    bool = False,
+) -> torch.Tensor:
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
        int32 instancemap, with each instance having a unique value'''
     assert masks.ndim == 4 and masks.shape[1] == 1
-    if len(masks) == 0:
+    # NOTE: need .shape[0] instead of len() for onnx
+    n = masks.shape[0]
+    if n == 0:
         return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
+    if largest_only:
+        masks = keep_largest_object(masks)
+    if remove_overlaps:
+        overlaps = (masks.sum(dim=0, keepdims=True) > 1)
+        masks    = masks * ~overlaps
+    
     instancelabels = \
-        torch.arange(1, len(masks)+1, device=masks.device, dtype=torch.int32)
-    instances = (masks * instancelabels[:,None,None]).max(0)[0]
+        torch.arange(1, n+1, device=masks.device, dtype=torch.int32)
+    instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
     return instances
 
+
+def keep_largest_object(masks:torch.Tensor) -> torch.Tensor:
+    assert masks.ndim == 3
+    assert masks.dtype == torch.bool
+
+    kernel = np.ones([3,3], dtype=np.int32)
+    output:tp.List[torch.Tensor] = []
+    for m in masks:
+        m = m.detach().cpu()
+        labeled, n = scipy.ndimage.label(m.numpy(), kernel)
+        if n > 1:
+            uniques, counts = np.unique(labeled, return_counts=True)
+            # zero is background
+            largest_object_label = uniques[1:][counts[1:].argmax()]
+            m = torch.as_tensor(labeled == largest_object_label)
+        output.append(m)
+    return torch.stack(output).to(masks.device)
 
 
 class InstanceDataset(CC_CellsDataset):
@@ -281,20 +310,34 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 
             if progress_callback is not None:
                 progress_callback( i/n )
-        instancemap = stitch_and_relabel_instancemaps_from_grid(
+        stitched = stitch_and_relabel_instancemaps_from_grid(
             instancemap_patches, 
             grid, 
             self.slack
         )
-        classmap = delineate_instancemap(instancemap)
-
         if outputshape is None:
             outputshape = og_shape
-        full_output = datalib.resize_tensor2(
-            classmap[None].float(), 
+        
+        current_shape = stitched.shape
+        output_is_smaller = \
+            (outputshape[0] < current_shape[0]) or (outputshape[1] < current_shape[1])
+        
+        # NOTE: delineate the smaller image
+        # delineating before downsampling might reverse delineation
+        # delineating og-sized images can result in oom
+        if not output_is_smaller:
+            stitched = delineate_instancemap(stitched)
+
+        stitched = datalib.resize_tensor2(
+            # classmap[None].float(), 
+            stitched[None].float(),
             outputshape, 
             'nearest'
-        )[0].to(classmap.dtype)
+        )[0].to(stitched.dtype)
+
+        if output_is_smaller:
+            stitched = delineate_instancemap(stitched)
+        full_output = (stitched > 0)
         
         return full_output.cpu().numpy()
 
@@ -355,6 +398,7 @@ def relabel_instancemaps(
     map1:torch.Tensor,
     overlapbox0: Box,
     overlapbox1: Box,
+    minimum_overlap_pixels:int = 8,
 ) -> torch.Tensor:
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
@@ -376,7 +420,9 @@ def relabel_instancemaps(
     overlap_uniques, overlap_counts = \
         datalib.faster_unique_dim0_with_counts(overlapping_values)
 
-    # TODO: filter out too-small overlaps
+    # filter out too-small overlaps
+    good = (overlap_counts >= minimum_overlap_pixels)
+    overlap_uniques = overlap_uniques[good]
     
     #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
     # TODO: this is a simplification, rework this properly

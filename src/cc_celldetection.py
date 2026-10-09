@@ -224,13 +224,14 @@ def prepare_batch(
 class CC_CellsDataset(PatchedCachingDataset):
     def __init__(
         self, 
-        filepairs: tp.List[tp.Tuple[str,str]], 
-        patchsize: int, 
-        px_per_mm: float, 
+        filepairs:        tp.List[tp.Tuple[str,str]], 
+        patchsize:        int, 
+        px_per_mm:        float,  # input resolution 
+        target_px_per_mm: float = HARDCODED_GOOD_RESOLUTION,
         *a, 
         **kw
     ):
-        scale = HARDCODED_GOOD_RESOLUTION / px_per_mm
+        scale = target_px_per_mm / px_per_mm
         super().__init__(filepairs, patchsize, scale, *a, **kw)
         self.items = self.filepairs
     
