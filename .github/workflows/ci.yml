@@ -73,43 +73,67 @@ jobs:
           pip install \
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple        \
-            -r ../requirements.frozen.txt
+            -r ./requirements.frozen.txt
 
       - name: export
         run: |
-          MODELFILE=(./*.pt.zip)
+          cd models/angiosperm-treerings
+          MODELFILE=$(realpath ./*.pt.zip)
           echo $MODELFILE
-          python update-yolo.py --model=$MODELFILE
+          python ../../update-yolo.py --model=$MODELFILE
           
-          CARROTFILE=(./*.carrot.pt.zip)
-          ONNXFILE=(./*.onnx)
+          CARROTFILE=$(realpath ./*.carrot.pt.zip)
+          ONNXFILE=$(realpath ./*.onnx)
+          echo $CARROTFILE
+          echo $ONNXFILE
 
           # running twice to make sure the hash is deterministic
-          cp $MODELFILE copy.pt.zip
-          python update-yolo.py --model=copy.pt.zip
+          # NOTE: file name is important, therefore copying to a new folder
+          mkdir COPY && cd COPY
+          cp $MODELFILE ./
+          python ../../../update-yolo.py --model ./*.pt.zip
 
           ls -halt
 
-          sha256sum *.carrot.pt.zip
-          test "$(sha256sum CARROTFILE | cut -d' ' -f1)" = \
-              "$(sha256sum copy.carrot.pt.zip | cut -d' ' -f1)"
+          sha256sum ../*.carrot.pt.zip ./*.carrot.pt.zip
+          test "$(sha256sum $CARROTFILE | cut -d' ' -f1)" = \
+              "$(sha256sum ./*.carrot.pt.zip | cut -d' ' -f1)"
 
-          sha256sum *.onnx
-          test "$(sha256sum ONNXFILE | cut -d' ' -f1)" = \
-              "$(sha256sum copy.onnx | cut -d' ' -f1)"
+          sha256sum ../*.onnx ./*.onnx
+          test "$(sha256sum $ONNXFILE | cut -d' ' -f1)" = \
+              "$(sha256sum ./*.onnx | cut -d' ' -f1)"
 
-          rm ./copy.*
+          cd ..
+          rm -r COPY
+
+          echo "CARROTFILE=${CARROTFILE}" >> "$GITHUB_ENV"
+          echo "ONNXFILE=${ONNXFILE}" >> "$GITHUB_ENV"
       
+
       - name: Archive Models
         uses: actions/upload-artifact@v7
         with:
           name: models
           path: |
-            $CARROTFILE
-            $ONNXFILE
+            ${{ env.CARROTFILE }}
+            ${{ env.ONNXFILE }}
           if-no-files-found: error
 
 
+          # TODO:
+          # run tests with this model
+          # compute hashsum of evaluation code
+          # fetch/git clone evaluation set from huggingface
+          # compute hashsum of dataset
+          # if all 3 hashes have not changed, skip
+          # run inference
+          # run postprocessing
+          # run evaluation
+          # evaluation artifcacts
+            # metadata: 3 hashes
+            # metrics json
+            # per-image pixel-wise error maps
+          # model artifacts
 
 
 
