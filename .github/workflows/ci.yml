@@ -16,13 +16,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           submodules: 'recursive'
       
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13' 
+          cache: pip
+          cache-dependency-path: requirements.frozen.txt
       
       - name: Build
         run: |
@@ -38,11 +40,83 @@ jobs:
             --extra-index-url https://pypi.org/simple        \
             -r requirements.frozen.txt
           ./run_tests.sh
+      
+  
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+      
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13' 
+          cache: pip
+          cache-dependency-path: requirements.frozen.txt
+
+      - name: fetch-from-huggingface
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          mkdir models
+          cd models
+          git clone https://user:${HF_TOKEN}@huggingface.co/carrot-qwa/angiosperm-treerings
+          cd angiosperm-treerings
+          git checkout release-candidate
+          ls -halt
+          # only one modelfile
+          python -c "import glob; assert len(glob.glob('./*.pt.zip')) == 1"
+
+      - name: pip-install
+        run: |
+          pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple        \
+            -r ../requirements.frozen.txt
+
+      - name: export
+        run: |
+          MODELFILE=(./*.pt.zip)
+          echo $MODELFILE
+          python update-yolo.py --model=$MODELFILE
+          
+          CARROTFILE=(./*.carrot.pt.zip)
+          ONNXFILE=(./*.onnx)
+
+          # running twice to make sure the hash is deterministic
+          cp $MODELFILE copy.pt.zip
+          python update-yolo.py --model=copy.pt.zip
+
+          ls -halt
+
+          sha256sum *.carrot.pt.zip
+          test "$(sha256sum CARROTFILE | cut -d' ' -f1)" = \
+              "$(sha256sum copy.carrot.pt.zip | cut -d' ' -f1)"
+
+          sha256sum *.onnx
+          test "$(sha256sum ONNXFILE | cut -d' ' -f1)" = \
+              "$(sha256sum copy.onnx | cut -d' ' -f1)"
+
+          rm ./copy.*
+      
+      - name: Archive Models
+        uses: actions/upload-artifact@v7
+        with:
+          name: models
+          path: |
+            $CARROTFILE
+            $ONNXFILE
+          if-no-files-found: error
+
+
+
+
 
   build-wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           submodules: 'recursive'
       
@@ -71,7 +145,7 @@ jobs:
           ./run_tests_deno.sh
       
       - name: Archive JS module
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: modules
           path: |
@@ -87,10 +161,10 @@ jobs:
     if: ${{ github.event.inputs.release-wasm == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: modules
           path: artifact/
