@@ -9,6 +9,9 @@ on:
       release-wasm:
         type: boolean
         default: false
+      release-models:
+        type: boolean
+        default: false
 
 
 jobs:
@@ -118,6 +121,29 @@ jobs:
             ${{ env.CARROTFILE }}
             ${{ env.ONNXFILE }}
           if-no-files-found: error
+
+
+      - name: Release
+        if: ${{ github.event.inputs.release-models == 'true' }}
+        run: |
+          cd models/angiosperm-treerings
+          git checkout main
+          git config user.email carrot-qwa@users.noreply.huggingface.co
+          git config user.name carrot-qwa
+          git add ${{env.CARROTFILE}}
+          git add ${{env.ONNXFILE}}
+          if ! git diff --cached --quiet; then
+              TAGNAME=v$(date +%F)
+              echo $TAGNAME
+              git commit -m "$TAGNAME"
+              git tag --force $TAGNAME
+              git push origin main
+              git push origin --tags
+          else
+            echo "No changes"
+          fi
+
+
 
 
           # TODO:
