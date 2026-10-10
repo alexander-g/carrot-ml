@@ -1,9 +1,12 @@
-import shutil
+import io
 import os
+import shutil
+import tempfile
 import time
 import typing as tp
 
 import numpy as np
+import onnx
 import torch
 import ultralytics
 assert hasattr(ultralytics, 'YOLO'), 'Adjust PYTHONPATH to import ultralytics'
@@ -136,11 +139,7 @@ def train_yolo_on_treerings(
     if not verbose:
         ultralytics.utils.set_logging('ultralytics', verbose)
     
-    model_yamlfile = os.path.join( os.path.dirname(dataset_yaml), 'model.yaml' )
-    open(model_yamlfile, 'w').write(modified_model_yaml)
-    model = ultralytics.YOLO(model_yamlfile)
-    if weightsfile is not None:
-        model.load(weightsfile)
+    model = create_dataset_for_yolo(weightsfile)
     if progress_callback is not None:
         on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
         model.add_callback("on_train_epoch_end", on_epoch_end)
@@ -180,6 +179,22 @@ def train_yolo_on_treerings(
     carrotmodel.save(savepath)
     return carrotmodel
 
+
+def create_new_yolo_sem_model(weightsfile:tp.Optional[str] = None,) -> ultralytics.YOLO:
+    # NOTE: do not use tempfile.TemporaryDirectory because it creates
+    # random names and this changes the hash of the final model file
+    tempdir = os.path.join(tempfile.gettempdir(), 'carrot-tmp-dir')
+    model_yamlfile = os.path.join( tempdir, 'model.yaml' )
+    try:
+        os.makedirs(tempdir, exist_ok=True)
+        open(model_yamlfile, 'w').write(modified_model_yaml)
+        model = ultralytics.YOLO(model_yamlfile)
+    finally:
+        shutil.rmtree(tempdir)
+    
+    if weightsfile is not None:
+        model.load(weightsfile)
+    return model
 
 
 model_yaml = '''
@@ -230,7 +245,7 @@ head:
 
 
 modified_model_yaml = '''
-nc: 19
+nc: 2
 scales: # model compound scaling constants, i.e. 'model=yolo26n-sem.yaml' will call yolo26-sem.yaml with scale 'n'
   # [depth, width, max_channels]
 #   n: [0.50, 0.25, 1024] # summary: 260 layers, 2,572,280 parameters, 2,572,280 gradients, 6.1 GFLOPs
@@ -279,6 +294,67 @@ class TreeringsYOLO_CARROT(Treerings_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
         return extras_for_yolo(pe)
+
+
+
+class TreeringsYOLO_ONNXWrapper(torch.nn.Module):
+    def __init__(self, m:TreeringsYOLO_Module):
+        super().__init__()
+        self.m = m
+    
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        assert x.ndim == 4
+        assert x.shape[-1] == 3
+        assert x.dtype == torch.uint8
+        x = x.permute(0,3,1,2).float() / 255
+        x = self.m(x)
+        # future-proofing in case I change something
+        assert x.shape[1] == 1, x.shape
+        x = x[:,0]
+        return x
+
+
+def export_treerings_yolo_to_onnx(
+    module:     TreeringsYOLO_Module, 
+    outputpath: str,
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+):
+    px_per_mm = module.px_per_mm
+    wrapper   = TreeringsYOLO_ONNXWrapper(module)
+
+    inputs = (torch.zeros([1,inputsize,inputsize,3], dtype=torch.uint8), )
+    buffer = io.BytesIO()
+
+    torch.onnx.export(
+        model         = wrapper,
+        args          = inputs,
+        f             = buffer,       # type: ignore[arg-type]
+        export_params = True,
+        training      = torch.onnx.TrainingMode.EVAL,
+        input_names   = ['x'],
+        output_names  = ['y'],
+        verbose       = False,
+        do_constant_folding = False
+        #opset_version = 12,
+    )
+    buffer.seek(0)
+    onnxbytes = bytes(buffer.getbuffer())
+    # open(outputpath, 'wb').write(onnxbytes)
+
+    onnx_model = onnx.load_model_from_string(onnxbytes)
+    # onnx_model = onnx.load(outputpath)
+    meta = {
+        "px-per-mm": f"{px_per_mm}",
+        "modeltype": "carrot-treerings",
+    }
+    for key, value in meta.items():
+        entry = onnx_model.metadata_props.add()
+        entry.key = key
+        entry.value = str(value)
+
+    onnx.save(onnx_model, outputpath)
+
+
 
 
 
