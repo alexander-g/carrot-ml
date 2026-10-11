@@ -80,7 +80,7 @@ class CellsYOLO_Module(torch.nn.Module):
     def forward(
         self, 
         x: torch.Tensor, 
-        last_layer_tta_rounds: int = 10, 
+        last_layer_tta_rounds: int = 0, 
         last_layer_tta_noise:  float = 0.25
     ):
         assert x.ndim == 4
@@ -283,12 +283,7 @@ def train_yolo_on_cells(
         cachedir         = cachedir,
     )
     dataset_yaml = convert_instance_dataset_for_yolo(dataset)
-
-    model_yamlfile = os.path.join( os.path.dirname(dataset_yaml), 'model.yaml' )
-    open(model_yamlfile, 'w').write(model_yaml)
-    yolo = ultralytics.YOLO(model_yamlfile)
-    if weightsfile is not None:
-        yolo.load(weightsfile)
+    yolo = create_new_yolo_det_model(os.path.dirname(dataset_yaml), weightsfile)
     
     if progress_callback is not None:
         on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
@@ -355,6 +350,21 @@ def train_yolo_on_cells(
 
 
 
+def create_new_yolo_det_model(
+    cachedir:    str, 
+    weightsfile: tp.Optional[str] = None,
+) -> ultralytics.YOLO:
+    model_yamlfile = os.path.join( cachedir, 'model.yaml' )
+    os.makedirs(cachedir, exist_ok=True)
+    open(model_yamlfile, 'w').write(model_yaml)
+    model = ultralytics.YOLO(model_yamlfile)
+    
+    if weightsfile is not None:
+        model.load(weightsfile)
+    return model
+
+
+
 # NOTE: removed rocket emoji because it causes issues in windows
 model_yaml = '''
 # Ultralytics  AGPL-3.0 License - https://ultralytics.com/license
@@ -364,7 +374,7 @@ model_yaml = '''
 # Task docs: https://docs.ultralytics.com/tasks/detect
 
 # Parameters
-nc: 80 # number of classes
+nc: 2 # number of classes
 end2end: True # whether to use end-to-end mode
 reg_max: 1 # DFL bins
 scales: # model compound scaling constants, i.e. 'model=yolo26n.yaml' will call yolo26.yaml with scale 'n'
@@ -449,37 +459,5 @@ def start_training_from_carrot(
         cachedir          = cachedir,
     )
     return carrotmodel
-
-
-
-
-if __name__ == '__main__':
-    import os
-    import glob
-    import PIL.Image
-
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/2026-07-31_cells/best.pt')
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    m = ultralytics.YOLO('./checkpoints/2026-09-22_17h08m01s_cells/weights/best.pt')
-    head = modellib.load_model('checkpoints/2026-10-02_13h03m47s_640px_30e_shuffle1.0-head-avgpool/2026-10-02__shuffle1.0-head-avgpool.pt.zip').module
-    inputsize = m.args['imgsz']
-    print('inputsize:', inputsize)
-
-    m.model.model[-1].max_det *= 2  #useless
-    module = CellsYOLO_Module(m, head, px_per_mm=HARDCODED_GOOD_RESOLUTION*inputsize/800).eval()
-    model  = MaskRCNN_Cells_CARROT(module)
-
-    outputdir = 'DEBUG/2026-08-19_yolo-inference/2026-10-02_cells-maskhead'
-    os.makedirs(outputdir, exist_ok=True)
-    for f in sorted( glob.glob('data/2026-08-21_bw-cells-500/inputs/*') ):
-    # for f in sorted( glob.glob('data/2026-09-05_cells-deciduous/inputs/*') ):
-        print(f)
-        output = model.process_image(f, px_per_mm=1000, progress_callback=print, batchsize=4)
-        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
-        print()
-
-    print('done')
-
 
 
