@@ -43,10 +43,19 @@ class MaskHead(torch.nn.Module):
             crops = crop_tensor_at_boxes(x[i], _boxes, self.masksize, 'bilinear')
             all_crops.append(crops)
 
-        y = self.module(torch.cat(all_crops))
-        y = y.reshape(len(y), self.masksize, self.masksize)
-        y = torch.split(y, [len(b) for b in boxes])
+        all_crops_cat = torch.cat(all_crops)      
+        y = self.module(all_crops_cat)
+        y = torchscriptable_crop_reshape(y, self.masksize)
+        y = torch.split(y, [b.shape[0] for b in boxes])
         return y
+
+
+@torch.jit.script_if_tracing
+def torchscriptable_crop_reshape(x:torch.Tensor, masksize:int) -> torch.Tensor:
+    if x.shape[0] == 0:
+        return torch.empty([0, masksize, masksize], dtype=x.dtype, device=x.device)
+    else:
+        return x.reshape(x.shape[0], masksize, masksize)
 
 
 
@@ -173,11 +182,12 @@ def crop_tensor_at_boxes(
     flatgrid = grid.reshape([1,1,-1,2])  # grid_sample needs batch dim to be same
     flatcrop = torch.nn.functional.grid_sample(x.float()[None], flatgrid, mode=mode, align_corners=True)
     if ndim_is_two:
-        crops = flatcrop.reshape(len(boxes), size, size)
+        crops = flatcrop.reshape(-1, size, size)
     else:
-        crops = flatcrop.reshape(C, len(boxes), size, size).permute(1, 0, 2, 3)
+        crops = flatcrop.reshape(C, -1, size, size).permute(1, 0, 2, 3)
     return crops
 
+@torch.jit.script_if_tracing
 def convert_boxmasks_into_full_result(
     shape:  tp.Tuple[int,int], 
     boxes:  torch.Tensor, 
@@ -188,30 +198,46 @@ def convert_boxmasks_into_full_result(
     assert boxes.shape[1] == 4
     assert masks.ndim == 3          # [N,H,W]
     assert len(boxes) == len(masks)
+    
+    masks = masks.float()
 
     H, W = shape
     output = \
-        torch.zeros( (len(boxes),H,W), dtype=masks.dtype, device=masks.device )
-    if len(boxes) == 0:
-        return output
+        torch.zeros( (boxes.shape[0],H,W), dtype=masks.dtype, device=masks.device )
 
-    mask_h, mask_w = masks.shape[-2:]
+    x0 = boxes[:,0]
+    y0 = boxes[:,1]
+    x1 = boxes[:,2]
+    y1 = boxes[:,3]
 
-    for i, (box, mask) in enumerate(zip(boxes, masks)):
-        x0, y0, x1, y1 = box
+    # integer coordinates in the result that fall inside the box.
+    ix0 = torch.ceil(x0).clip(0, None).to(torch.int64)
+    iy0 = torch.ceil(y0).clip(0, None).to(torch.int64)
+    ix1 = torch.ceil(x1).clip(None, W).to(torch.int64)
+    iy1 = torch.ceil(y1).clip(None, H).to(torch.int64)
+    intboxes = torch.stack([ix0, iy0, ix1, iy1], dim=1)
 
-        # integer coordinates in the result that fall inside the box.
-        ix0 = max(0, int(torch.ceil(x0).item()))
-        iy0 = max(0, int(torch.ceil(y0).item()))
-        ix1 = min(W, int(torch.ceil(x1).item()))
-        iy1 = min(H, int(torch.ceil(y1).item()))
+    outofbounds = (ix0 >= ix1) | (iy0 >= iy1)
+    inbounds    = ~outofbounds
+    boxes       = boxes[inbounds]
+    intboxes    = intboxes[inbounds]
+    masks       = masks[inbounds]
 
-        if ix0 >= ix1 or iy0 >= iy1:
-            continue
+    for i, (box, intbox, mask) in enumerate(zip(boxes, intboxes, masks)):
+        # x0, y0, x1, y1 = box   # onnx export error
+        x0 = box[0]
+        y0 = box[1]
+        x1 = box[2]
+        y1 = box[3]
+
+        x0int = int(intbox[0])
+        y0int = int(intbox[1])
+        x1int = int(intbox[2])
+        y1int = int(intbox[3])
 
         # output-space integer coordinates -> mask-space coordinates
-        ys = torch.arange(iy0, iy1, device=masks.device, dtype=boxes.dtype)
-        xs = torch.arange(ix0, ix1, device=masks.device, dtype=boxes.dtype)
+        ys = torch.arange(y0int, y1int, device=masks.device, dtype=boxes.dtype)
+        xs = torch.arange(x0int, x1int, device=masks.device, dtype=boxes.dtype)
 
         yy, xx = torch.meshgrid(ys, xs, indexing="ij")
 
@@ -228,7 +254,7 @@ def convert_boxmasks_into_full_result(
             align_corners = False,
         )[0, 0]
 
-        output[i, iy0:iy1, ix0:ix1] += sampled.to(output.dtype)
+        output[i, y0int:y1int, x0int:x1int] += sampled.to(output.dtype)
     return output
 
 

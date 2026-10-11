@@ -352,12 +352,15 @@ def train_yolo_on_cells(
 
 def create_new_yolo_det_model(
     cachedir:    str, 
+    inputsize:   tp.Optional[int] = None,
     weightsfile: tp.Optional[str] = None,
 ) -> ultralytics.YOLO:
     model_yamlfile = os.path.join( cachedir, 'model.yaml' )
     os.makedirs(cachedir, exist_ok=True)
     open(model_yamlfile, 'w').write(model_yaml)
     model = ultralytics.YOLO(model_yamlfile)
+    if inputsize is not None:
+        model.args['imgsz'] = inputsize
     
     if weightsfile is not None:
         model.load(weightsfile)
