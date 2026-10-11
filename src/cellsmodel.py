@@ -15,6 +15,7 @@ from traininglib.segmentation.connectedcomponents import (
 from traininglib.modellib import BaseModel
 from traininglib.trainingtask import TrainingTask, Loss, Metrics
 
+from .maskrcnn_celldetection import relabel_instancemaps
 from .util import load_and_scale_image
 
 
@@ -127,46 +128,8 @@ def instancemap_to_points(
 
 
 
+# NOTE: relabel_instancemaps() moved to maskrcnn_celldetection.py
 
-def relabel_instancemaps(
-    map0:torch.Tensor, 
-    map1:torch.Tensor,
-    overlapbox0: Box,
-    overlapbox1: Box,
-) -> torch.Tensor:
-    '''Relabel instance map `map1` so that overlapping instances have the same 
-       value as in map0. (overlap boxes in format left,top,width,height) '''
-    assert map0.ndim == map1.ndim == 2
-    assert map0.dtype in [torch.int64, torch.int32]
-    assert map0.dtype == map1.dtype 
-    assert overlapbox0[2:] == overlapbox1[2:]
-    assert (torch.tensor(overlapbox0) >= 0).all()
-    assert (torch.tensor(overlapbox1) >= 0).all()
-
-    x0,y0,w0,h0 = overlapbox0
-    x1,y1,w1,h1 = overlapbox1
-    overlap0 = map0[y0:, x0:][:h0,:w0]
-    overlap1 = map1[y1:, x1:][:h1,:w1]
-    assert overlap0.shape == overlap1.shape, [overlap0.shape, overlap1.shape]
-
-    mask = (overlap0 > 0) & (overlap1 > 0)
-    overlapping_values = torch.stack([overlap0, overlap1], dim=-1)[mask]
-    overlap_uniques, overlap_counts = \
-        datalib.faster_unique_dim0_with_counts(overlapping_values)
-
-    # TODO: filter out too-small overlaps
-    
-    #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
-    # TODO: this is a simplification, rework this properly
-    adjacency_labels  = torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
-    relabeled_map1    = _relabel(map1[None,None], overlap_uniques, adjacency_labels)[0,0]
-    unchanged_in_map1 = (map1 == relabeled_map1)
-    relabeled_map1 = torch.where( 
-        (map1 > 0) & unchanged_in_map1, 
-        relabeled_map1 + map0.max() + 1, 
-        relabeled_map1 
-    )
-    return relabeled_map1
 
 def stitch_and_relabel_instancemaps_from_grid(
     instancemaps: tp.List[torch.Tensor], 
