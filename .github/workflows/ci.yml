@@ -64,12 +64,13 @@ jobs:
         run: |
           mkdir models
           cd models
-          git clone https://user:${HF_TOKEN}@huggingface.co/carrot-qwa/angiosperm-treerings
+          git clone --depth 1 --no-single-branch https://user:${HF_TOKEN}@huggingface.co/carrot-qwa/angiosperm-treerings
           cd angiosperm-treerings
           git checkout release-candidate
           ls -halt
           # only one modelfile
           python -c "import glob; assert len(glob.glob('./*.pt.zip')) == 1"
+
 
       - name: pip-install
         run: |
@@ -84,11 +85,12 @@ jobs:
           MODELFILE=$(realpath ./*.pt.zip)
           echo $MODELFILE
           python ../../update-yolo.py --model=$MODELFILE
+
+          CARROTFILE=$(realpath ./angiosperm-treerings.carrot.pt.zip)
+          ONNXFILE=$(realpath ./angiosperm-treerings.onnx)
           
-          CARROTFILE=$(realpath ./*.carrot.pt.zip)
-          ONNXFILE=$(realpath ./*.onnx)
-          echo $CARROTFILE
-          echo $ONNXFILE
+          mv ./*.carrot.pt.zip $CARROTFILE
+          mv ./*.onnx $ONNXFILE
 
           # running twice to make sure the hash is deterministic
           # NOTE: file name is important, therefore copying to a new folder
@@ -111,6 +113,15 @@ jobs:
 
           echo "CARROTFILE=${CARROTFILE}" >> "$GITHUB_ENV"
           echo "ONNXFILE=${ONNXFILE}" >> "$GITHUB_ENV"
+
+
+      - name: smoke-test
+        run: |
+          python inference.py \
+            --model=${{ env.CARROTFILE }} \
+            --input=tests/assets/black.png \
+            --px-per-mm=1000 \
+            --output=/tmp/DELETE
       
 
       - name: Archive Models
@@ -126,10 +137,25 @@ jobs:
       - name: Release
         if: ${{ github.event.inputs.release-models == 'true' }}
         run: |
+          # copy files before hard reset
+          cp ${{env.CARROTFILE}} ./
+          cp ${{env.ONNXFILE}} ./
+          
           cd models/angiosperm-treerings
-          git checkout main
-          git config user.email carrot-qwa@users.noreply.huggingface.co
-          git config user.name carrot-qwa
+
+          # reset
+          git checkout --force main
+          cp ../../$(basename ${{env.CARROTFILE}}) ${{env.CARROTFILE}}
+          cp ../../$(basename ${{env.ONNXFILE}})   ${{env.ONNXFILE}}
+          ls
+
+
+          # make sure only one .pt.zip and .onnx
+          python -c "import glob; assert len(glob.glob('./*.pt.zip')) == 1"
+          python -c "import glob; assert len(glob.glob('./*.onnx')) == 1"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ${{env.CARROTFILE}}
           git add ${{env.ONNXFILE}}
           if ! git diff --cached --quiet; then
