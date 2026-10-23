@@ -127,7 +127,7 @@ def get_model_version(modelpath:str) -> str:
         date_str = date.strftime(pattern)
     except:
         timestamp = os.path.getmtime(modelpath)
-        modified  = datetime.datetime.fromtimestamp(timestamp)
+        date      = datetime.datetime.fromtimestamp(timestamp)
         date_str  = date.strftime(pattern)
 
     return f'{date_str}:{sha256}'

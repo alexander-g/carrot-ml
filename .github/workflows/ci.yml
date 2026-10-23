@@ -90,8 +90,11 @@ jobs:
           CARROTFILE=$(realpath ./angiosperm-treerings.carrot.pt.zip)
           ONNXFILE=$(realpath ./angiosperm-treerings.onnx)
           
-          mv ./*.carrot.pt.zip $CARROTFILE
-          mv ./*.onnx $ONNXFILE
+          # NOTE: if on main branch, there is alread a carrot.pt.zip
+          # use the most recent one
+          mv $(ls -t -- *.pt.zip | head -n 1) $CARROTFILE
+          # same with onnx
+          mv $(ls -t -- *.onnx | head -n 1) $ONNXFILE
 
           # running twice to make sure the hash is deterministic
           # NOTE: file name is important, therefore copying to a new folder
@@ -100,14 +103,16 @@ jobs:
           python ../../../update-yolo.py --model ./*.pt.zip
 
           ls -halt
+          COPY_CARROTFILE=$(ls -t -- *.pt.zip | head -n 1)
+          COPY_ONNXFILE=$(ls -t -- *.onnx | head -n 1)
 
-          sha256sum ../*.carrot.pt.zip ./*.carrot.pt.zip
+          sha256sum ../*.pt.zip ./*.carrot.pt.zip
           test "$(sha256sum $CARROTFILE | cut -d' ' -f1)" = \
-              "$(sha256sum ./*.carrot.pt.zip | cut -d' ' -f1)"
+              "$(sha256sum $COPY_CARROTFILE | cut -d' ' -f1)"
 
           sha256sum ../*.onnx ./*.onnx
           test "$(sha256sum $ONNXFILE | cut -d' ' -f1)" = \
-              "$(sha256sum ./*.onnx | cut -d' ' -f1)"
+              "$(sha256sum $COPY_ONNXFILE | cut -d' ' -f1)"
 
           cd ..
           rm -r COPY
@@ -198,92 +203,98 @@ jobs:
           # only one modelfile
           python -c "import glob; assert len(glob.glob('./*.pt.zip')) == 1"
 
-    - name: pip-install
-      run: |
-        pip install \
-          --index-url https://download.pytorch.org/whl/cpu \
-          --extra-index-url https://pypi.org/simple        \
-          -r ./requirements.frozen.txt
+      - name: pip-install
+        run: |
+          pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple        \
+            -r ./requirements.frozen.txt
 
-    - name: export
-      run: |
-        cd models/angiosperm-vessels
-        MODELFILE=$(realpath ./*.pt.zip)
-        echo $MODELFILE
-        python ../../update-yolo.py --model=$MODELFILE
+      - name: export
+        run: |
+          cd models/angiosperm-vessels
+          MODELFILE=$(realpath ./*.pt.zip)
+          echo $MODELFILE
+          python ../../update-yolo.py --model=$MODELFILE
 
-        CARROTFILE=$(realpath ./angiosperm-vessels.carrot.pt.zip)
-        ONNXFILE=$(realpath ./angiosperm-vessels.onnx)
-        
-        mv ./*.carrot.pt.zip $CARROTFILE
-        mv ./*.onnx $ONNXFILE
+          CARROTFILE=$(realpath ./angiosperm-vessels.carrot.pt.zip)
+          ONNXFILE=$(realpath ./angiosperm-vessels.onnx)
+          
+          # NOTE: if on main branch, there is alread a carrot.pt.zip
+          # use the most recent one
+          mv $(ls -t -- *.pt.zip | head -n 1) $CARROTFILE
+          # same with onnx
+          mv $(ls -t -- *.onnx | head -n 1) $ONNXFILE
 
-        # running twice to make sure the hash is deterministic
-        # NOTE: file name is important, therefore copying to a new folder
-        mkdir COPY && cd COPY
-        cp $MODELFILE ./
-        python ../../../update-yolo.py --model ./*.pt.zip
+          # running twice to make sure the hash is deterministic
+          # NOTE: file name is important, therefore copying to a new folder
+          mkdir COPY && cd COPY
+          cp $MODELFILE ./
+          python ../../../update-yolo.py --model ./*.pt.zip
 
-        ls -halt
+          ls -halt
+          COPY_CARROTFILE=$(ls -t -- *.pt.zip | head -n 1)
+          COPY_ONNXFILE=$(ls -t -- *.onnx | head -n 1)
 
-        sha256sum ../*.carrot.pt.zip ./*.carrot.pt.zip
-        test "$(sha256sum $CARROTFILE | cut -d' ' -f1)" = \
-            "$(sha256sum ./*.carrot.pt.zip | cut -d' ' -f1)"
+          sha256sum ../*.pt.zip ./*.carrot.pt.zip
+          test "$(sha256sum $CARROTFILE | cut -d' ' -f1)" = \
+              "$(sha256sum $COPY_CARROTFILE | cut -d' ' -f1)"
 
-        sha256sum ../*.onnx ./*.onnx
-        test "$(sha256sum $ONNXFILE | cut -d' ' -f1)" = \
-            "$(sha256sum ./*.onnx | cut -d' ' -f1)"
+          sha256sum ../*.onnx ./*.onnx
+          test "$(sha256sum $ONNXFILE | cut -d' ' -f1)" = \
+              "$(sha256sum $COPY_ONNXFILE | cut -d' ' -f1)"
 
-        cd ..
-        rm -r COPY
+          cd ..
+          rm -r COPY
 
-        echo "CARROTFILE=${CARROTFILE}" >> "$GITHUB_ENV"
-        echo "ONNXFILE=${ONNXFILE}" >> "$GITHUB_ENV"
+          echo "CARROTFILE=${CARROTFILE}" >> "$GITHUB_ENV"
+          echo "ONNXFILE=${ONNXFILE}" >> "$GITHUB_ENV"
 
-    - name: smoke-test
-      run: |
-        python inference.py \
-          --model=${{ env.CARROTFILE }} \
-          --input=tests/assets/black.png \
-          --px-per-mm=1000 \
-          --output=/tmp/DELETE
+      - name: smoke-test
+        run: |
+          python inference.py \
+            --model=${{ env.CARROTFILE }} \
+            --input=tests/assets/black.png \
+            --px-per-mm=1000 \
+            --output=/tmp/DELETE
 
-    
-    - name: evaluate
-      run: |
-        git clone --depth 1 https://user:${HF_TOKEN}@huggingface.co/carrot-qwa/angiosperm-vessels-validation-set
-        git clone --depth 1 https://github.com/alexander-g/carrot-evaluation
-        
-        python inference.py \
-          --model=${{env.CARROTFILE}} \
-          --input=angiosperm-vessels-validation-set/splitfile.txt \
-          --px-per-mm=1000                                        \
-          --output=inference/
+      
+      - name: evaluate
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git clone --depth 1 https://user:${HF_TOKEN}@huggingface.co/datasets/carrot-qwa/angiosperm-vessels-validation-set
+          git clone --depth 1 https://github.com/alexander-g/carrot-evaluation
+          
+          python inference.py \
+            --model=${{env.CARROTFILE}} \
+            --input=angiosperm-vessels-validation-set/splitfile.txt \
+            --px-per-mm=1000                                        \
+            --output=inference/
 
-        cd carrot-evalution
-        echo "TODO: pip install the deps of the evaluation repo"
-        python evaluate.py \
-          --outputs=inference \
-          --annotations=../angiosperm-vessels-validation-set/splitfile.txt
-        cat inference/metrics.json
-    
+          echo "TODO: pip install the deps of the evaluation repo"
+          python carrot-evaluation/evaluate.py \
+            --outputs=inference/ \
+            --annotations=angiosperm-vessels-validation-set/splitfile.txt
+          cat inference/metrics.json
+      
 
-    - name: Archive Models
-      uses: actions/upload-artifact@v7
-      with:
-        name: models-cells
-        path: |
-          ${{ env.CARROTFILE }}
-          ${{ env.ONNXFILE }}
-        if-no-files-found: error
-    
-    - name: Archive Evaluation
-      uses: actions/upload-artifact@v7
-      with:
-        name: evaluation-cells
-        path: |
-          inference/
-        if-no-files-found: error
+      - name: Archive Models
+        uses: actions/upload-artifact@v7
+        with:
+          name: models-cells
+          path: |
+            ${{ env.CARROTFILE }}
+            ${{ env.ONNXFILE }}
+          if-no-files-found: error
+      
+      - name: Archive Evaluation
+        uses: actions/upload-artifact@v7
+        with:
+          name: evaluation-cells
+          path: |
+            inference/
+          if-no-files-found: error
 
 
 
