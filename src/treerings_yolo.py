@@ -315,12 +315,12 @@ class TreeringsYOLO_ONNXWrapper(torch.nn.Module):
 
 
 def export_treerings_yolo_to_onnx(
-    module:     TreeringsYOLO_Module, 
+    module:     TreeringsInference, 
     outputpath: str,
     inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
 ):
-    px_per_mm = module.px_per_mm
-    wrapper   = TreeringsYOLO_ONNXWrapper(module)
+    px_per_mm = module.module.px_per_mm
+    wrapper   = TreeringsYOLO_ONNXWrapper(module.module)
 
     inputs = (torch.zeros([1,inputsize,inputsize,3], dtype=torch.uint8), )
     buffer = io.BytesIO()
@@ -334,6 +334,7 @@ def export_treerings_yolo_to_onnx(
         input_names   = ['x'],
         output_names  = ['y'],
         verbose       = False,
+        dynamo        = False,
         do_constant_folding = False
         #opset_version = 12,
     )

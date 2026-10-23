@@ -1,3 +1,7 @@
+import datetime
+import hashlib
+import os
+import subprocess
 import typing as tp
 
 import numpy as np
@@ -108,3 +112,46 @@ def scale_points_yx(points_yx:np.ndarray, from_shape:Shape, to_shape:Shape) -> n
     scaled_xy = scale_points_xy( points_xy, from_shape, to_shape )
     scaled_yx = scaled_xy[:,::-1]
     return scaled_yx
+
+
+
+def get_model_version(modelpath:str) -> str:
+    with open(modelpath, "rb") as f:
+        sha256 = hashlib.file_digest(f, "sha256").hexdigest()
+    
+    pattern = '%Y-%m-%d'
+    print('TODO: check if training date + code date in the zipfile')
+    try:
+        basename = os.path.basename(modelpath)
+        date = datetime.datetime.strptime(basename[:len('YYYY-MM-DD')], pattern)
+        date_str = date.strftime(pattern)
+    except:
+        timestamp = os.path.getmtime(modelpath)
+        date      = datetime.datetime.fromtimestamp(timestamp)
+        date_str  = date.strftime(pattern)
+
+    return f'{date_str}:{sha256}'
+
+
+def git(folder:str, *args: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(folder), *args],
+        text   = True,
+        stderr = subprocess.DEVNULL,
+    ).strip()
+
+def git_version(folder: str) -> str|None:
+    folder = os.path.realpath(folder)
+    try:
+        repo_root = git(folder, 'rev-parse', '--show-toplevel')
+        if repo_root != folder:
+            return None
+        
+        date = git(folder, "show", "-s", "--format=%cs", "HEAD")
+        commit_hash = git(folder, "rev-parse", "HEAD")
+        dirty = bool(git(folder, "status", "--porcelain"))
+
+        return f"{date}:{commit_hash}{'-dirty' if dirty else ''}"
+    except subprocess.CalledProcessError:
+        return None
+

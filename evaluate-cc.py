@@ -4,12 +4,11 @@ import json
 import os
 import typing as tp
 
-import tifffile
 import numpy as np
+import scipy
 import torch
 
 from traininglib import datalib
-from traininglib.segmentation import connectedcomponents as concom
 from src.evaluation import IoU_matrix, best_iou_matches_greedy
 
 
@@ -18,7 +17,7 @@ def main(args:argparse.Namespace):
     file_pairs = collect_output_annotation_pairs(
         args.outputs, 
         args.annotations, 
-        '.jpg.instances.tiff'
+        '.png'
     )
     all_metrics = []
     for i, (annotationfile, outputfile) in enumerate(file_pairs):
@@ -73,13 +72,13 @@ def are_files_matching(
 
 
 def evaluate_file_pair(outputfile:str, annotationfile:str):
-    output = torch.as_tensor(tifffile.imread(outputfile)).to(torch.int32)
+    output = datalib.load_image(outputfile, mode='L')
+    output, _ = scipy.ndimage.label( output.numpy()[0] > 0.5, np.ones([3,3]) )
+    output = torch.as_tensor(output).to(torch.int32)
+
     annotation = datalib.load_image(annotationfile, mode='L')
-    annotation = concom.connected_components_patchwise(
-        annotation[None] > 0.5, 
-        patchsize=512
-    )[0,0]
-    annotation = torch.unique(annotation, return_inverse=True)[1].to(torch.int32)
+    annotation, _ = scipy.ndimage.label( annotation.numpy()[0] > 0.5, np.ones([3,3]) )
+    annotation = torch.as_tensor(annotation).to(torch.int32)
 
     iou = IoU_matrix(output, annotation, zero_out_zero=True)
     matches, best_ious = best_iou_matches_greedy(iou, threshold=0.7)

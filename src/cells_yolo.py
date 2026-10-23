@@ -1,4 +1,5 @@
 import glob
+import io
 import os
 import shutil
 import time
@@ -6,6 +7,7 @@ import typing as tp
 
 
 import numpy as np
+import onnx
 import PIL.Image
 import torch
 import torchvision
@@ -37,6 +39,11 @@ from .maskrcnn_celldetection import (
     InstanceDataset,
 )
 from .util import load_and_scale_image
+from .cells_yolo_maskhead import (
+    MaskHead, 
+    MaskHeadTrainStep,
+    convert_boxmasks_into_full_result
+)
 
 
 
@@ -55,23 +62,29 @@ HARDCODED_DEFAULT_PATCHSIZE = 800
 
 
 YOLO26S_SEGMENT_PRETRAINED_WEIGHTS_URL = \
-    'https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-seg.pt'
-
+    'https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt'
 
 
 
 
 
 class CellsYOLO_Module(torch.nn.Module):
-    def __init__(self, yolo:ultralytics.YOLO, px_per_mm:float):
+    def __init__(self, yolo:ultralytics.YOLO, maskhead:MaskHead, px_per_mm:float):
         super().__init__()
+        assert yolo.args['task'] == 'detect'
         self.yolomodel = yolo.model
         # NOTE: in list to avoid capture by torch.nn.Module
         self._yolo = [yolo]
         self.inputsize = yolo.model.args['imgsz']
+        self.maskhead = maskhead
         self.px_per_mm = px_per_mm
     
-    def forward(self, x:torch.Tensor):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        last_layer_tta_rounds: int = 0, 
+        last_layer_tta_noise:  float = 0.25
+    ):
         assert x.ndim == 4
         B,C,H,W = x.shape
         assert H <= self.inputsize and W <= self.inputsize, [self.inputsize, x.shape]
@@ -79,40 +92,60 @@ class CellsYOLO_Module(torch.nn.Module):
         # pad to avoid misalignment errors
         x = datalib.pad_to_minimum_size(x, self.inputsize)
 
-        output, _  = self.yolomodel(x)
-        boxes      = output[0][:,:,:4]
-        confidence = output[0][:,:, 4]
+        # output, _  = self.yolomodel(x)
+        per_layer_output:tp.List = []
+        for layer_i, layer in enumerate(self.yolomodel.model):
+            if type(layer.f) == int:
+                layer_input = \
+                    per_layer_output[layer.f] if len(per_layer_output) > 0 else x
+                layer_output = layer(layer_input)
+            else:
+                # multi-input
+                layer_inputs = [per_layer_output[i] for i in layer.f]
+                layer_output = layer(layer_inputs)
+            per_layer_output.append(layer_output)
+        output, _  = per_layer_output[-1]
+        boxes      = output[...,:4]
+        confidence = output[..., 4]
+
+        torch.manual_seed(0)
+        augment_boxes = [boxes]
+        augment_confidence = [confidence]
+        last_layer_inputs = layer_inputs
+        for i in range(last_layer_tta_rounds):
+            noisy_last_layer_inputs = [ 
+                inp * (torch.randn_like(inp)*last_layer_tta_noise +1) 
+                    for inp in last_layer_inputs  
+            ]
+            noisy_output,_   = layer(noisy_last_layer_inputs)
+            noisy_boxes      = noisy_output[...,:4]
+            noisy_confidence = noisy_output[..., 4]
+            augment_boxes.append(noisy_boxes)
+            augment_confidence.append(noisy_confidence)
+        boxes      = torch.cat(augment_boxes, dim=1)
+        confidence = torch.cat(augment_confidence, dim=1)
         
         outputs = []
         for i in range(B):
-            good        = confidence[i] > 0.25
-            mask_coeffs = output[0][i, good, 6:]
-            good_boxes  = boxes[i, good]
-            good_scores = confidence[i, good]
-
+            good         = confidence[i] > 0.25
+            good_boxes   = boxes[i, good]
+            good_scores  = confidence[i, good]
             keep_indices = \
                 torchvision.ops.nms(good_boxes, good_scores, iou_threshold=0.3)
             postnms_boxes = good_boxes[keep_indices]
-            mask_coeffs   = mask_coeffs[keep_indices]
 
-            proto = output[1][i]
-            masks = ultralytics.utils.ops.process_mask(
-                proto, 
-                mask_coeffs, 
-                postnms_boxes, 
-                x.shape[-2:], 
-                upsample = True
-            )  # NHW
+            boxmasks = self.maskhead(x[i][None], [postnms_boxes])[0]
 
-            # remove the padding again
-            masks = masks[..., :H, :W]
+            fullmasks = \
+                convert_boxmasks_into_full_result((H,W), postnms_boxes, boxmasks > 0)
+            fullmasks = (fullmasks > 0)
 
             instancemap = masks_to_instancemap(
-                masks[:,None], 
-                largest_only    = True, 
+                fullmasks[:,None], 
+                largest_only    = False,   # redundant with the new mask head
                 remove_overlaps = True,
             )
-            # instancemap = masks_to_instancemap(masks[:,None], remove_overlaps=True)
+
             outputs.append({'instances': instancemap})
         return outputs
 
@@ -130,47 +163,36 @@ def read_image_as_binary(path:str):
     return x
 
 
-def create_dataset_for_yolo(
-    splitfile: str, 
-    patchsize: int, 
-    px_per_mm: float, 
-    outputdir: str
-) -> str:
-    os.makedirs(outputdir, exist_ok=True)
-    dataset = InstanceDataset.from_splitfile(
-        splitfile, 
-        patchsize        = patchsize, 
-        px_per_mm        = px_per_mm,
-        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
-        cachedir         = outputdir,
-    )
+def convert_instance_dataset_for_yolo(dataset:InstanceDataset) -> str:
     cachedir = os.path.realpath(dataset.cachedir)
 
-    # make sure files have the same name
-    old_an_dir = os.path.join(cachedir, 'an')
-    new_an_dir = os.path.join(cachedir, 'an2')
-    os.makedirs(new_an_dir, exist_ok=True)
-    for inf, anf in dataset.items:
-        new_anf = os.path.join(new_an_dir, os.path.basename(inf))
-        # and is an instancemap, replace with mask
-        anf = os.path.join(old_an_dir, os.path.basename(anf))
-        shutil.copy(anf, new_anf)
-
     # yolo wants the folder to be called "images"
-    shutil.copytree(
-        os.path.join(cachedir, 'in'), 
-        os.path.join(cachedir, 'images/'),
-        dirs_exist_ok = True,
+    # keeping the old one to avoid cache issues
+    old_input_dir = os.path.join(cachedir, 'in')
+    new_input_dir = os.path.join(cachedir, 'images/')
+    shutil.copytree(old_input_dir, new_input_dir, dirs_exist_ok=True,)
+
+    # replace the dataset items accordingly
+    dataset.items = [
+        (os.path.join(new_input_dir, os.path.basename(inf)), anf) 
+            for inf, anf in dataset.items
+    ]
+
+    # convert instance maps to .txt files
+    labels_txt_dir = os.path.join(cachedir, 'labels/')
+    os.makedirs(labels_txt_dir, exist_ok=True)
+    instancemaps = [anf for _inf,anf in dataset.items]
+    txtfiles = convert_instancemaps_to_yolo_det(
+        inputfiles = instancemaps, 
+        outputdir  = labels_txt_dir, 
+        classlabel = 1
     )
 
-    # convert masks to .txt files
-    labels_txt_dir = os.path.join(cachedir, 'labels/')
-    ultralytics.data.converter.convert_segment_masks_to_yolo_seg(
-        masks_dir  = new_an_dir, 
-        output_dir = labels_txt_dir,
-        classes    = 1,
-        imread_fn  = read_image_as_binary,
-    )
+    # rename the text files, yolo expects them to have the same name as inputs
+    inputfiles = [inf for inf,_ in dataset.items]
+    for inf, txtf in zip(inputfiles, txtfiles):
+        new_txtf = os.path.splitext(os.path.basename(inf))[0] + '.txt'
+        shutil.move(txtf, os.path.join(labels_txt_dir, new_txtf))
 
 
     dataset_yaml = dataset_yaml_template.format(rootpath=cachedir)
@@ -190,64 +212,161 @@ names:
   1: lumen
 '''
 
+def convert_instancemaps_to_yolo_det(
+    inputfiles: tp.List[str], 
+    outputdir:  str, 
+    classlabel: int,
+) -> tp.List[str]:
+    '''Convert png files with individual objects represented with a unique integer 
+       value to `.txt` files as required by yolo object detection. '''
+    outputfiles = []
+    for f in inputfiles:
+        outputlines = []
+        outputpath  = os.path.join(outputdir, os.path.basename(f)+'.txt')
+
+        x = np.array(PIL.Image.open(f).convert('L'))
+        h,w = x.shape
+        uniques = np.unique(x)
+        for value in uniques:
+            if value == 0:
+                continue
+            indices = np.argwhere(x == value)
+            # from yx to xy
+            indices = indices[:,::-1]
+
+            minima  = indices.min(0)
+            maxima  = indices.max(0)
+            center  = (minima + maxima) / 2 / (w,h)
+            boxsize = (maxima - minima) / (w,h)
+
+            line = f'{classlabel} {center[0]} {center[1]} {boxsize[0]} {boxsize[1]}'
+            outputlines.append(line)
+        
+        txt = '\n'.join(outputlines)
+        with open(outputpath, 'w') as outf:
+            outf.write(txt)
+
+        outputfiles.append(outputpath)
+    return outputfiles
+
+
+
+
+
+
+
 
 
 def train_yolo_on_cells(
-    dataset_yaml:      str, 
-    epochs:            int, 
+    splitfile:         str,
+    px_per_mm:         float, 
     inputsize:         int,
+    epochs:            int,
     batchsize:         int = 4,
     weightsfile:       tp.Optional[str] = None,
     progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
-    verbose:           bool = False,
     outputdir:         str = 'checkpoints/',
+    cachedir:          str = 'cache/',
+    # if provided, do not train yolo, simply reuse the provided weights
+    reuse_yolo:        tp.Optional[str] = None,
 ):
-    assert outputdir is not None, 'outputdir currently required'
     outputdir = os.path.abspath(outputdir)
     os.makedirs(outputdir, exist_ok=True)
 
+    verbose = (progress_callback is None)
     if not verbose:
         ultralytics.utils.set_logging('ultralytics', verbose)
 
-    model_yamlfile = os.path.join( os.path.dirname(dataset_yaml), 'model.yaml' )
-    open(model_yamlfile, 'w').write(model_yaml)
-    model = ultralytics.YOLO(model_yamlfile)
-    if weightsfile is not None:
-        model.load(weightsfile)
+    dataset = InstanceDataset.from_splitfile(
+        splitfile        = splitfile, 
+        patchsize        = inputsize, 
+        px_per_mm        = px_per_mm,
+        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
+        cachedir         = cachedir,
+    )
+    dataset_yaml = convert_instance_dataset_for_yolo(dataset)
+    yolo = create_new_yolo_det_model(os.path.dirname(dataset_yaml), weightsfile)
     
     if progress_callback is not None:
         on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
-        model.add_callback("on_train_epoch_end", on_epoch_end)
+        yolo.add_callback("on_train_epoch_end", on_epoch_end)
 
     if not verbose:
-        model.overrides['plots'] = False
-    model.overrides['val'] = False
+        yolo.overrides['plots'] = False
+    yolo.overrides['val'] = False
 
     run_name = time.strftime("%Y-%m-%d_%Hh%Mm%Ss_cells")
-    results = model.train(
-        data    = dataset_yaml, 
-        epochs  = epochs, 
-        imgsz   = inputsize, 
-        amp     = False, 
-        flipud  = 0.5, 
-        fliplr  = 0.5, 
-        degrees = 90, 
-        workers = 0, 
-        batch   = batchsize, 
-        verbose = verbose,
-        project = outputdir,
-        name    = run_name,
-        mask_ratio = 2,
+    if reuse_yolo is None:
+        results = yolo.train(
+            data    = dataset_yaml, 
+            epochs  = epochs, 
+            imgsz   = inputsize, 
+            amp     = False, 
+            flipud  = 0.5, 
+            fliplr  = 0.5, 
+            degrees = 90, 
+            workers = 0, 
+            batch   = batchsize, 
+            verbose = verbose,
+            project = outputdir,
+            name    = run_name,
+            mask_ratio = 2,
+        )
+
+        # re-creating yolo, because it contains some crap
+        best_pt = os.path.join(outputdir, run_name, 'weights', 'best.pt')
+        yolo = ultralytics.YOLO(best_pt)
+    else:
+        print(f'Re-using YOLO from {reuse_yolo}')
+        yolo = ultralytics.YOLO(reuse_yolo)
+        weights_dir  = os.path.join(outputdir, run_name, 'weights')
+        weights_path = os.path.join(weights_dir, os.path.basename(reuse_yolo))
+        os.makedirs(weights_dir, exist_ok=True)
+        shutil.copy(reuse_yolo, weights_path)
+
+    dataset = InstanceDataset.from_splitfile(
+        splitfile        = splitfile, 
+        patchsize        = 480, 
+        px_per_mm        = px_per_mm,
+        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
+        cachedir         = cachedir,
     )
 
-    # re-creating yolo, because it contains some crap
-    best_pt = os.path.join(outputdir, run_name, 'weights', 'best.pt')
-    model = ultralytics.YOLO(best_pt)
+    head  = MaskHead()
+    step  = MaskHeadTrainStep(head)
+    ld:tp.Sequence = datalib.create_dataloader( # type: ignore
+        dataset, 
+        batch_size = batchsize * 2,  # x2 because model is much smaller
+        shuffle    = True,
+        loader_type = 'threaded',
+    )
+    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback, lr=1e-3)
 
-    module = CellsYOLO_Module(model, px_per_mm=HARDCODED_GOOD_RESOLUTION).eval()
+    module = \
+        CellsYOLO_Module(yolo, head, px_per_mm=HARDCODED_GOOD_RESOLUTION).eval()
     module.inputsize = inputsize
     carrotmodel = CellsYOLO_CARROT(module)
+    carrotpath  = os.path.join(outputdir, f'{run_name}/{run_name}.carrot.pt.zip')
+    carrotmodel.save(carrotpath)
     return carrotmodel
+
+
+
+def create_new_yolo_det_model(
+    cachedir:    str, 
+    inputsize:   tp.Optional[int] = None,
+    weightsfile: tp.Optional[str] = None,
+) -> ultralytics.YOLO:
+    model_yamlfile = os.path.join( cachedir, 'model.yaml' )
+    os.makedirs(cachedir, exist_ok=True)
+    open(model_yamlfile, 'w').write(model_yaml)
+    model = ultralytics.YOLO(model_yamlfile)
+    if inputsize is not None:
+        model.args['imgsz'] = inputsize
+    
+    if weightsfile is not None:
+        model.load(weightsfile)
+    return model
 
 
 
@@ -255,21 +374,21 @@ def train_yolo_on_cells(
 model_yaml = '''
 # Ultralytics  AGPL-3.0 License - https://ultralytics.com/license
 
-# Ultralytics YOLO26-seg instance segmentation model with P3/8 - P5/32 outputs
+# Ultralytics YOLO26 object detection model with P3/8 - P5/32 outputs
 # Model docs: https://docs.ultralytics.com/models/yolo26
-# Task docs: https://docs.ultralytics.com/tasks/segment
+# Task docs: https://docs.ultralytics.com/tasks/detect
 
 # Parameters
-nc: 80 # number of classes
+nc: 2 # number of classes
 end2end: True # whether to use end-to-end mode
 reg_max: 1 # DFL bins
-scales: # model compound scaling constants, i.e. 'model=yolo26n-seg.yaml' will call yolo26-seg.yaml with scale 'n'
+scales: # model compound scaling constants, i.e. 'model=yolo26n.yaml' will call yolo26.yaml with scale 'n'
   # [depth, width, max_channels]
-  # n: [0.50, 0.25, 1024] # summary: 309 layers, 3,126,280 parameters, 3,126,280 gradients, 10.5 GFLOPs
-  s: [0.50, 0.50, 1024] # summary: 309 layers, 11,505,800 parameters, 11,505,800 gradients, 37.4 GFLOPs
-  # m: [0.50, 1.00, 512] # summary: 329 layers, 27,112,072 parameters, 27,112,072 gradients, 132.5 GFLOPs
-  # l: [1.00, 1.00, 512] # summary: 441 layers, 31,515,528 parameters, 31,515,528 gradients, 150.9 GFLOPs
-  # x: [1.00, 1.50, 512] # summary: 441 layers, 70,693,800 parameters, 70,693,800 gradients, 337.7 GFLOPs
+#   n: [0.50, 0.25, 1024] # summary: 260 layers, 2,572,280 parameters, 2,572,280 gradients, 6.1 GFLOPs
+  s: [0.50, 0.50, 1024] # summary: 260 layers, 10,009,784 parameters, 10,009,784 gradients, 22.8 GFLOPs
+#   m: [0.50, 1.00, 512] # summary: 280 layers, 21,896,248 parameters, 21,896,248 gradients, 75.4 GFLOPs
+#   l: [1.00, 1.00, 512] # summary: 392 layers, 26,299,704 parameters, 26,299,704 gradients, 93.8 GFLOPs
+#   x: [1.00, 1.50, 512] # summary: 392 layers, 58,993,368 parameters, 58,993,368 gradients, 209.5 GFLOPs
 
 # YOLO26n backbone
 backbone:
@@ -304,7 +423,7 @@ head:
   - [[-1, 10], 1, Concat, [1]] # cat head P5
   - [-1, 1, C3k2, [1024, True, 0.5, True]] # 22 (P5/32-large)
 
-  - [[16, 19, 22], 1, Segment26, [nc, 32, 256]] # Segment26(P3, P4, P5)
+  - [[16, 19, 22], 1, Detect, [nc]] # Detect(P3, P4, P5)
 
 '''
 
@@ -312,6 +431,65 @@ class CellsYOLO_CARROT(MaskRCNN_Cells_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
         return extras_for_yolo(pe)
+
+
+
+class CellsYOLO_ONNXWrapper(torch.nn.Module):
+    def __init__(self, m:CellsYOLO_Module):
+        super().__init__()
+        self.m = m
+    
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        assert x.ndim == 4
+        assert x.shape[-1] == 3
+        assert x.dtype == torch.uint8
+
+        x = x.permute(0,3,1,2).float() / 255
+        outputs = self.m(x)
+        output  = torch.stack([item['instances'] for item in outputs])
+        return output
+
+
+def export_cells_yolo_to_onnx(
+    module:     CellsYOLO_Module, 
+    outputpath: str,
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+):
+    px_per_mm = module.px_per_mm
+    wrapper   = CellsYOLO_ONNXWrapper(module)
+
+    inputs = (torch.zeros([1,inputsize,inputsize,3], dtype=torch.uint8), )
+    buffer = io.BytesIO()
+
+    torch.onnx.export(
+        model         = wrapper,
+        args          = inputs,
+        f             = buffer,       # type: ignore[arg-type]
+        export_params = True,
+        training      = torch.onnx.TrainingMode.EVAL,
+        input_names   = ['x'],
+        output_names  = ['y'],
+        verbose       = False,
+        dynamo        = False,
+        do_constant_folding = False,
+        #opset_version = 12,
+    )
+    buffer.seek(0)
+    onnxbytes = bytes(buffer.getbuffer())
+
+    onnx_model = onnx.load_model_from_string(onnxbytes)
+    meta = {
+        "px-per-mm": f"{px_per_mm}",
+        "modeltype": "carrot-cells",
+    }
+    for key, value in meta.items():
+        entry = onnx_model.metadata_props.add()
+        entry.key = key
+        entry.value = str(value)
+
+    onnx.save(onnx_model, outputpath)
+
+
 
 
 
@@ -333,54 +511,17 @@ def start_training_from_carrot(
     splitfile = os.path.join(cachedir, 'dataset.yaml')
     datalib.save_file_tuples(splitfile, filepairs)
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
-    dataset_yaml = create_dataset_for_yolo(
-        splitfile, 
-        patchsize, 
-        px_per_mm, 
-        outputdir = cachedir
-    )
 
     carrotmodel = train_yolo_on_cells(
-        dataset_yaml, 
-        epochs, 
+        splitfile         = splitfile, 
+        px_per_mm         = px_per_mm,
+        epochs            = epochs, 
         inputsize         = patchsize, 
         weightsfile       = weightsfile, 
         progress_callback = progress_callback,
-        verbose           = False,
         outputdir         = cachedir,
+        cachedir          = cachedir,
     )
     return carrotmodel
-
-
-    return
-
-
-
-
-if __name__ == '__main__':
-    import os
-    import glob
-    import PIL.Image
-
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/2026-07-31_cells/best.pt')
-    # m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    m = ultralytics.YOLO('/home/superuser/Projects/misc/yolo/ultralytics/runs/segment/train-29/weights/best.pt')
-    inputsize = m.args['imgsz']
-    print('inputsize:', inputsize)
-
-    m.model.model[-1].max_det *= 2  #useless
-    module = CellsYOLO_Module(m, px_per_mm=HARDCODED_GOOD_RESOLUTION*inputsize/800).eval()
-    model  = MaskRCNN_Cells_CARROT(module)
-
-    outputdir = 'DEBUG/2026-08-19_yolo-inference/cells-500pxpermm_4'
-    os.makedirs(outputdir, exist_ok=True)
-    for f in sorted( glob.glob('data/2026-08-21_bw-cells-500/inputs/*') ):
-        print(f)
-        output = model.process_image(f, px_per_mm=1000, progress_callback=print, batchsize=4)
-        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
-        print()
-
-    print('done')
-
 
 

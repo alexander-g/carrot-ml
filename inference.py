@@ -1,18 +1,31 @@
+import argparse
+import hashlib
+import json
+import os
 import typing as tp
 import warnings; warnings.simplefilter('ignore')
-import argparse
-import os
 
 import numpy as np
 import PIL.Image
 
 from traininglib import datalib, modellib, args, inference
+from src import util
 
 
 
 def main(args: argparse.Namespace):
+    versions = {
+        'model': util.get_model_version(args.model),
+        'dataset': util.git_version(os.path.dirname(args.input))
+    }
+    print(versions)
+
     for inferenceitem in inference.base_inference(args, px_per_mm=args.px_per_mm):
         save_output(inferenceitem, args.output)
+
+    with open(os.path.join(args.output, 'meta.json'), 'w') as f:
+        f.write(json.dumps(versions, indent=2))
+    
 
 
 def save_output(inferenceitem, destination:str) -> str:

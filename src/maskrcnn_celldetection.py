@@ -192,7 +192,7 @@ def exclude_border_instances(instancemap:torch.Tensor) -> torch.Tensor:
     return instancemap
 
 
-
+@torch.jit.script_if_tracing
 def masks_to_instancemap(
     masks:           torch.Tensor, 
     threshold:       float = 0.5,
@@ -208,10 +208,10 @@ def masks_to_instancemap(
         return torch.zeros(masks.shape[2:], device=masks.device, dtype=torch.int32)
     masks = masks[:,0]
     masks = (masks > threshold)
-    if largest_only:
+    if not torch.jit.is_scripting() and largest_only:
         masks = keep_largest_object(masks)
     if remove_overlaps:
-        overlaps = (masks.sum(dim=0, keepdims=True) > 1)
+        overlaps = torch.sum(masks, dim=0, keepdim=True) > 1
         masks    = masks * ~overlaps
     
     instancelabels = \
