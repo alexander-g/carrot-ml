@@ -1,4 +1,5 @@
 import glob
+import io
 import os
 import shutil
 import time
@@ -6,6 +7,7 @@ import typing as tp
 
 
 import numpy as np
+import onnx
 import PIL.Image
 import torch
 import torchvision
@@ -429,6 +431,65 @@ class CellsYOLO_CARROT(MaskRCNN_Cells_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
         return extras_for_yolo(pe)
+
+
+
+class CellsYOLO_ONNXWrapper(torch.nn.Module):
+    def __init__(self, m:CellsYOLO_Module):
+        super().__init__()
+        self.m = m
+    
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        assert x.ndim == 4
+        assert x.shape[-1] == 3
+        assert x.dtype == torch.uint8
+
+        x = x.permute(0,3,1,2).float() / 255
+        outputs = self.m(x)
+        output  = torch.stack([item['instances'] for item in outputs])
+        return output
+
+
+def export_cells_yolo_to_onnx(
+    module:     CellsYOLO_Module, 
+    outputpath: str,
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+):
+    px_per_mm = module.px_per_mm
+    wrapper   = CellsYOLO_ONNXWrapper(module)
+
+    inputs = (torch.zeros([1,inputsize,inputsize,3], dtype=torch.uint8), )
+    buffer = io.BytesIO()
+
+    torch.onnx.export(
+        model         = wrapper,
+        args          = inputs,
+        f             = buffer,       # type: ignore[arg-type]
+        export_params = True,
+        training      = torch.onnx.TrainingMode.EVAL,
+        input_names   = ['x'],
+        output_names  = ['y'],
+        verbose       = False,
+        dynamo        = False,
+        do_constant_folding = False,
+        #opset_version = 12,
+    )
+    buffer.seek(0)
+    onnxbytes = bytes(buffer.getbuffer())
+
+    onnx_model = onnx.load_model_from_string(onnxbytes)
+    meta = {
+        "px-per-mm": f"{px_per_mm}",
+        "modeltype": "carrot-cells",
+    }
+    for key, value in meta.items():
+        entry = onnx_model.metadata_props.add()
+        entry.key = key
+        entry.value = str(value)
+
+    onnx.save(onnx_model, outputpath)
+
+
 
 
 

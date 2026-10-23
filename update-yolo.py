@@ -1,11 +1,18 @@
 import argparse
 import os
+import typing as tp
 
 import torch
 import ultralytics
 
 from traininglib import modellib
-from src.cells_yolo import CellsYOLO_CARROT, CellsYOLO_Module
+from src.cells_yolo import (
+    CellsYOLO_CARROT, 
+    CellsYOLO_Module,
+    MaskHead,
+    create_new_yolo_det_model,
+    export_cells_yolo_to_onnx
+)
 from src.treerings_yolo import (
     TreeringsYOLO_CARROT, 
     TreeringsYOLO_Module, 
@@ -23,6 +30,7 @@ def update(args:argparse.Namespace):
     inference: CellsYOLO_Module|TreeringsInference
 
     outputdir = os.path.dirname(args.model)
+    export_onnx_fn: tp.Callable|None = None
 
     if args.model.endswith('.pt'):
         m = ultralytics.YOLO(args.model)  # type: ignore[attr-defined]
@@ -50,13 +58,29 @@ def update(args:argparse.Namespace):
             inference = TreeringsInference(
                 TreeringsYOLO_Module(yolomodel, px_per_mm),
                 patchsize = patchsize,
-            )
-            inference.load_state_dict(m.module.state_dict())
+            ).eval()
+            status = inference.load_state_dict(m.module.state_dict())
+            print(status)
             CARROT_cls = TreeringsYOLO_CARROT
 
             basename = os.path.basename(args.model).removesuffix('.pt.zip')
             outputpath_onnx = os.path.join(outputdir, basename+'.onnx')
-            export_treerings_yolo_to_onnx(m.module.module, outputpath_onnx, patchsize)
+            export_onnx_fn = export_treerings_yolo_to_onnx
+
+        elif clsname == 'CellsYOLO_CARROT':
+            yolomodel = create_new_yolo_det_model('/tmp', inputsize=800)
+            px_per_mm = m.module.px_per_mm
+            patchsize = m.module.inputsize
+            maskhead  = MaskHead()
+            inference = CellsYOLO_Module(yolomodel, maskhead, px_per_mm).eval()
+            status    = inference.load_state_dict(m.module.state_dict())
+            print(status)
+            CARROT_cls = CellsYOLO_CARROT
+
+            basename = os.path.basename(args.model).removesuffix('.pt.zip')
+            outputpath_onnx = os.path.join(outputdir, basename+'.onnx')
+            export_onnx_fn = export_cells_yolo_to_onnx
+            # export_cells_yolo_to_onnx(inference, outputpath_onnx, patchsize)
         else:
             print(f'Unknown model class: {clsname}')
             return
@@ -71,6 +95,11 @@ def update(args:argparse.Namespace):
     print()
     print(f'Saving to {outputpath}')
     carrotmodule.save(outputpath)
+
+    if export_onnx_fn is not None:
+        outputpath_onnx = os.path.join(outputdir, basename+'.onnx')
+        print(f'Saving ONNX to {outputpath_onnx}')
+        export_onnx_fn(carrotmodule.module, outputpath_onnx, patchsize)
 
 
 
