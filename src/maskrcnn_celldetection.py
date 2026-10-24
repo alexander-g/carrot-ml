@@ -387,6 +387,43 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 
 
 
+def IoU_matrix(a:torch.Tensor, b:torch.Tensor, zero_out_zero:bool) -> torch.Tensor:
+    assert a.ndim == b.ndim == 2
+    assert a.shape == b.shape
+    assert a.dtype == b.dtype == torch.int32
+
+    # ensure labels are sequential
+    a = torch.unique(a, return_inverse=True)[1].to(torch.int32)
+    b = torch.unique(b, return_inverse=True)[1].to(torch.int32)
+
+    uniques_a, counts_a = torch.unique(a, return_counts=True)
+    uniques_b, counts_b = torch.unique(b, return_counts=True)
+    matrix = torch.empty([len(uniques_a), len(uniques_b)], dtype=torch.int64)
+
+    # stack and view as int64 for faster processing
+    stacked = torch.stack([a,b], dim=-1).view(torch.int64)
+    uniques_ab, counts_ab = torch.unique(stacked, return_counts=True)
+
+    # back to int32 and labels that overlap are paired [N,2]
+    unstacked = uniques_ab.view(torch.int32).reshape(-1,2)
+
+    intersections_mat = torch.zeros_like(matrix)
+    intersections_mat[unstacked[:,0], unstacked[:,1]] = counts_ab
+
+    unions_mat =  torch.zeros_like(matrix)
+    unions_mat += counts_a[:,None]
+    unions_mat += counts_b[None,:]
+    unions_mat = unions_mat - intersections_mat
+
+    iou_mat = intersections_mat / unions_mat
+    iou_mat[unions_mat == 0] = 0
+
+    if zero_out_zero:
+        iou_mat[uniques_a == 0, :] = 0
+        iou_mat[:, uniques_b == 0] = 0
+
+    return iou_mat
+
 
 
 # y0,x0,y1,x1
@@ -398,7 +435,7 @@ def relabel_instancemaps(
     map1:torch.Tensor,
     overlapbox0: Box,
     overlapbox1: Box,
-    minimum_overlap_pixels:int = 8,
+    minimum_iou:float = 0.1,
 ) -> torch.Tensor:
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
@@ -415,16 +452,13 @@ def relabel_instancemaps(
     overlap1 = map1[y1:, x1:][:h1,:w1]
     assert overlap0.shape == overlap1.shape, [overlap0.shape, overlap1.shape]
 
-    mask = (overlap0 > 0) & (overlap1 > 0)
-    overlapping_values = torch.stack([overlap0, overlap1], dim=-1)[mask]
-    overlap_uniques, overlap_counts = \
-        datalib.faster_unique_dim0_with_counts(overlapping_values)
-
-    # filter out too-small overlaps
-    good = (overlap_counts >= minimum_overlap_pixels)
-    overlap_uniques = overlap_uniques[good]
+    iou = IoU_matrix(overlap0, overlap1, zero_out_zero=True)
+    good_iou_indices = torch.argwhere(iou > minimum_iou)
+    overlap_uniques = torch.stack([
+        torch.unique(overlap0)[good_iou_indices[:,0]],
+        torch.unique(overlap1)[good_iou_indices[:,1]]
+    ], dim=-1)
     
-    #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
     # TODO: this is a simplification, rework this properly
     adjacency_labels = \
         torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
