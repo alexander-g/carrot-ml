@@ -318,11 +318,17 @@ def train_yolo_on_cells(
         yolo = ultralytics.YOLO(best_pt)
     else:
         print(f'Re-using YOLO from {reuse_yolo}')
-        yolo = ultralytics.YOLO(reuse_yolo)
         weights_dir  = os.path.join(outputdir, run_name, 'weights')
         weights_path = os.path.join(weights_dir, os.path.basename(reuse_yolo))
         os.makedirs(weights_dir, exist_ok=True)
-        shutil.copy(reuse_yolo, weights_path)
+        if reuse_yolo.endswith('.pt'):
+            yolo = ultralytics.YOLO(reuse_yolo)
+            shutil.copy(reuse_yolo, weights_path)
+        elif reuse_yolo.endswith('.pt.zip'):
+            carrotmodel = modellib.load_model(reuse_yolo)
+            _yolo = carrotmodel.module._yolo[0]
+            yolo  = create_new_yolo_det_model(weights_dir)
+            print(yolo.load_state_dict(_yolo.state_dict()))
 
     dataset = InstanceDataset.from_splitfile(
         splitfile        = splitfile, 

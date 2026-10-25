@@ -139,14 +139,15 @@ def prepare_batch(
         assert instancemap.ndim == 2
         # DONT: instancemap = exclude_border_instances(instancemap)
 
-        masks = instancemap_to_masks(instancemap)  # one-hot masks
-        boxes = masks_to_boxes(masks)
+        masks       = instancemap_to_masks(instancemap)  # one-hot masks
+        boxes       = masks_to_boxes(masks)
+        box_indices = torch.arange(len(boxes), device=boxes.device)
         if augment:
             boxes   = augment_boxes(boxes)
         if len(boxes) > max_masks and augment:
-            indices = torch.randperm(len(boxes))[:max_masks]
-            boxes   = boxes[indices]
-        targets = instancemap_to_targets(instancemap, boxes, size=masksize)
+            box_indices = torch.randperm(len(boxes))[:max_masks]
+            boxes       = boxes[box_indices]
+        targets = instancemap_to_targets(instancemap, boxes, box_indices+1, size=masksize)
 
         all_images.append(x)
         all_boxes.append(boxes.to(device))
@@ -307,16 +308,22 @@ def augment_boxes(boxes:torch.Tensor) -> torch.Tensor:
 def instancemap_to_targets(
     instancemap: torch.Tensor, 
     boxes:       torch.Tensor, 
+    box_indices: torch.Tensor,
     size:        int,
 ) -> torch.Tensor:
     assert instancemap.ndim == 2
     assert instancemap.dtype == torch.int64
     assert boxes.ndim == 2
     assert boxes.shape[-1] == 4
+    assert box_indices.dtype == torch.int64
+    assert box_indices.ndim == 1
+    assert len(box_indices) == len(boxes)
+    assert not (box_indices == 0).any(), \
+        'box indices must be incremented by one to match the instancemap values'
 
     crops   = crop_tensor_at_boxes(instancemap, boxes, size, 'nearest')
-    indices = torch.arange(len(crops), device=crops.device) + 1
-    masks   = crops == indices[:, None, None]
+    # indices = torch.arange(len(crops), device=crops.device) + 1
+    masks   = crops == box_indices[:,None,None]
     return masks.float()
 
 
