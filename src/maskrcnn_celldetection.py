@@ -431,11 +431,12 @@ Box = tp.Tuple[int,int,int,int]
 
 
 def relabel_instancemaps(
-    map0:torch.Tensor, 
-    map1:torch.Tensor,
+    map0:        torch.Tensor, 
+    map1:        torch.Tensor,
     overlapbox0: Box,
     overlapbox1: Box,
-    minimum_iou:float = 0.1,
+    next_value:  int,
+    minimum_iou: float = 0.1,
 ) -> torch.Tensor:
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
@@ -467,7 +468,7 @@ def relabel_instancemaps(
     unchanged_in_map1 = ~torch.isin(map1, overlap_uniques[:,1])
     relabeled_map1 = torch.where( 
         (map1 > 0) & unchanged_in_map1, 
-        relabeled_map1 + map0.max() + 1, 
+        relabeled_map1 + next_value + 1, 
         relabeled_map1 
     )
     return relabeled_map1
@@ -503,6 +504,7 @@ def stitch_and_relabel_instancemaps_from_grid(
 
     grid_rows:tp.List[torch.Tensor] = []
     instancemap_rows:tp.List[torch.Tensor] = []
+    next_value = 1
     for i in range(H):
         for j in range(1, W):
             gridcell0 = grid[i,j-1]
@@ -513,8 +515,9 @@ def stitch_and_relabel_instancemaps_from_grid(
             overlap1  = (x0 - gridcell1[1], y0 - gridcell1[0], w, h)
             instancemap0 = instancemaps[i*W + j-1]
             instancemap1 = instancemaps[i*W + j]
+            next_value = max(next_value, instancemap0.max() + 1)
             instancemap1 = \
-                relabel_instancemaps(instancemap0, instancemap1, overlap0, overlap1)
+                relabel_instancemaps(instancemap0, instancemap1, overlap0, overlap1, next_value)
             instancemaps[i*W + j] = instancemap1
         
         gridcell_row_i = torch.cat([grid[i,0,:2], grid[i,-1,2:]], dim=-1)
@@ -525,6 +528,7 @@ def stitch_and_relabel_instancemaps_from_grid(
         for _q in range(i*W, (i+1)*W):
             instancemaps[_q] = None  # type: ignore
 
+        next_value = 1
         if i > 0:
             gridcell0 = grid_rows[i-1]
             gridcell1 = gridcell_row_i
@@ -537,6 +541,7 @@ def stitch_and_relabel_instancemaps_from_grid(
                 instancemap_row_i,
                 overlap0,
                 overlap1,
+                next_value,
             )
         instancemap_rows.append(instancemap_row_i)
         grid_rows.append(gridcell_row_i)
