@@ -141,11 +141,11 @@ def prepare_batch(
 
         masks = instancemap_to_masks(instancemap)  # one-hot masks
         boxes = masks_to_boxes(masks)
-        if len(boxes) > max_masks and augment:
-            indices = torch.randperm(max_masks)
-            boxes   = boxes[indices]
         if augment:
             boxes   = augment_boxes(boxes)
+        if len(boxes) > max_masks and augment:
+            indices = torch.randperm(len(boxes))[:max_masks]
+            boxes   = boxes[indices]
         targets = instancemap_to_targets(instancemap, boxes, size=masksize)
 
         all_images.append(x)
