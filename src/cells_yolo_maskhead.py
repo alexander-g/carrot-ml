@@ -21,16 +21,20 @@ from .maskrcnn_celldetection import (
 class MaskHead(torch.nn.Module):
     '''Very basic segmentation model that crops an image at boxes and segments them.'''
 
-    def __init__(self, masksize:int=64):
+    def __init__(self, masksize:int=64, boxcanvas:bool = True):
         super().__init__()
         self.masksize = masksize
         n_c = masksize ** 2
         # self.module = torchvision.models.shufflenet_v2_x0_5(weights='DEFAULT')
         self.module = torchvision.models.shufflenet_v2_x1_0(weights='DEFAULT')
 
-        n_input_channels = 4
-        self.module.conv1[0] =\
-            _clone_conv2d_with_new_input_channels(self.module.conv1[0], n_input_channels)
+        self.boxcanvas = boxcanvas
+        if boxcanvas:
+            n_input_channels = 4
+            self.module.conv1[0] =_clone_conv2d_with_new_input_channels(
+                self.module.conv1[0], 
+                n_input_channels
+            )
 
         # future-proofing for myself, in case I change the model
         assert hasattr(self.module, 'fc')
@@ -51,17 +55,19 @@ class MaskHead(torch.nn.Module):
         
         all_crops = []
         for i, _boxes in enumerate(boxes):
-            # a forth channel that is added to the input
-            # so that each crop contains other overlapping boxes
-            # to learn not to segment them in crowded areas
-            boxcanvas = torch.zeros(x.shape[-2:], device=x.device)
-            boxes_to_render = all_boxes[i] if all_boxes is not None else _boxes
-            boxcanvas = accumulate_boxes_on_canvas(boxcanvas, boxes_to_render)
-            # -1 to remove the self-box
-            boxcanvas = boxcanvas - 1
-
             x_i = x[i]
-            x_i = torch.cat([x_i, boxcanvas[None]])
+
+            if self.boxcanvas:
+                # a forth channel that is added to the input
+                # so that each crop contains other overlapping boxes
+                # to learn not to segment them in crowded areas
+                boxcanvas = torch.zeros(x.shape[-2:], device=x.device)
+                boxes_to_render = all_boxes[i] if all_boxes is not None else _boxes
+                boxcanvas = accumulate_boxes_on_canvas(boxcanvas, boxes_to_render)
+                # -1 to remove the self-box
+                boxcanvas = boxcanvas - 1
+                x_i = torch.cat([x_i, boxcanvas[None]])
+            
             crops = crop_tensor_at_boxes(x_i, _boxes, self.masksize, 'bilinear')
             all_crops.append(crops)
 
@@ -388,3 +394,10 @@ def accumulate_boxes_on_canvas(canvas:torch.Tensor, boxes:torch.Tensor) -> torch
         & (y <  boxes[:, 3, None, None])
     )
     return canvas + inside.sum(dim=0).to(canvas.dtype)
+
+
+def infer_maskhead_kw(module:MaskHead) -> dict:
+    return {
+        'masksize':  module.masksize,
+        'boxcanvas': getattr(module, 'boxcanvas', False),
+    }
