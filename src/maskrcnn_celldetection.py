@@ -390,7 +390,7 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 def IoU_matrix(a:torch.Tensor, b:torch.Tensor, zero_out_zero:bool) -> torch.Tensor:
     assert a.ndim == b.ndim == 2
     assert a.shape == b.shape
-    assert a.dtype == b.dtype == torch.int32
+    assert a.dtype == b.dtype == torch.int32  # 32 bits required because of .view()
 
     # ensure labels are sequential
     a = torch.unique(a, return_inverse=True)[1].to(torch.int32)
