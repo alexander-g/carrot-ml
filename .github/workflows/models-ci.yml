@@ -32,7 +32,6 @@ jobs:
           mkdir models
           cd models
           git clone --depth 1 --no-single-branch https://user:${HF_TOKEN}@huggingface.co/carrot-qwa/angiosperm-treerings
-          cd angiosperm-treerings
           git -C angiosperm-treerings branch   # for debugging
           
       - name: pip-install
@@ -45,7 +44,7 @@ jobs:
       - name: update-and-test
         run: |
           model_dir=models/angiosperm-treerings
-          bash .git/workflows/scripts/backward-update-test.sh
+          MODEL_DIR=$model_dir bash .github/workflows/scripts/backward-update-test.sh
 
           # the most recent .pt.zip and .onnx files
           updated_ptzip=$(realpath $(ls -t -- $model_dir/*.pt.zip | head -n 1))
@@ -132,7 +131,7 @@ jobs:
       - name: update-and-test
         run: |
           model_dir=models/angiosperm-vessels
-          bash .git/workflows/scripts/backward-update-test.sh
+          MODEL_DIR=$model_dir bash .github/workflows/scripts/backward-update-test.sh
 
           # the most recent .pt.zip and .onnx files
           updated_ptzip=$(realpath $(ls -t -- $model_dir/*.pt.zip | head -n 1))

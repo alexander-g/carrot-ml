@@ -72,8 +72,8 @@ updated_onnx=$(realpath $(ls -t -- $MODEL_DIR/*.onnx | head -n 1))
 # copy previous ones first
 copy_ptzip=/tmp/$(basename $updated_ptzip)
 copy_onnx=/tmp/$(basename $updated_onnx)
-mv $updated_ptzip $copy_ptzip && rm $updated_ptzip
-mv $updated_onnx  $copy_onnx && rm $updated_onnx
+mv $updated_ptzip $copy_ptzip
+mv $updated_onnx  $copy_onnx
 
 python update-yolo.py --model=$current_ptzip
 
