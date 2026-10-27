@@ -1,7 +1,8 @@
 from src.cells_yolo_maskhead import (
     MaskHead, 
     MaskHeadTrainStep, 
-    convert_boxmasks_into_full_result
+    convert_boxmasks_into_full_result,
+    accumulate_boxes_on_canvas,
 )
 
 import torch
@@ -10,8 +11,10 @@ import torch
 
 def test_trainstep():
     mask = torch.zeros([1, 512, 512], dtype=torch.int64)
-    mask[10:20, 10:20] = 1
-    mask[50:70, 70:80] = 2
+    mask[..., 10:20, 10:20] = 1
+    mask[..., 50:70, 70:80] = 2
+    mask[..., 100:400, 100:400] = 3
+    mask[..., 350:450, 350:450] = 4
     raw_batch = [ 
         (
             torch.zeros([3,512,512]),
@@ -67,5 +70,22 @@ def test_paste_boxmasks():
     output2 = convert_boxmasks_into_full_result(shape, boxes[:0], masks[:0])
     assert output2.shape == (0,512,512)
     assert output2.abs().sum() == 0
+
+
+
+def test_accumulate_boxes_on_canvas():
+    boxes = torch.tensor([
+        (10, 20, 50, 50),
+        (25, 25, 60, 60),
+        (30, 40, 70, 50),
+    ])
+    canvas = torch.zeros([100,100], dtype=torch.float32)
+
+    output0 = accumulate_boxes_on_canvas(canvas, boxes)
+    assert output0[9,9] == 0
+    assert output0[20,10] == 1
+    assert output0[25,25] == 2
+    assert output0[40,30] == 3
+    assert output0[45,65] == 1
 
 

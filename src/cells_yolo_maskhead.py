@@ -6,6 +6,7 @@ import torchvision
 
 from traininglib import datalib, modellib
 from traininglib.segmentation import margin_loss_fn
+from traininglib.unet import _clone_conv2d_with_new_input_channels
 
 from .maskrcnn_celldetection import (
     InstanceDataset, 
@@ -20,27 +21,54 @@ from .maskrcnn_celldetection import (
 class MaskHead(torch.nn.Module):
     '''Very basic segmentation model that crops an image at boxes and segments them.'''
 
-    def __init__(self, masksize:int=64):
+    def __init__(self, masksize:int=64, boxcanvas:bool = True):
         super().__init__()
         self.masksize = masksize
         n_c = masksize ** 2
         # self.module = torchvision.models.shufflenet_v2_x0_5(weights='DEFAULT')
         self.module = torchvision.models.shufflenet_v2_x1_0(weights='DEFAULT')
 
+        self.boxcanvas = boxcanvas
+        if boxcanvas:
+            n_input_channels = 4
+            self.module.conv1[0] =_clone_conv2d_with_new_input_channels(
+                self.module.conv1[0], 
+                n_input_channels
+            )
+
         # future-proofing for myself, in case I change the model
         assert hasattr(self.module, 'fc')
         # replace the last layer
         self.module.fc = torch.nn.Linear(1024, n_c)
 
-    def forward(self, x:torch.Tensor, boxes:tp.List[torch.Tensor]) -> tp.List[torch.Tensor]:
+    def forward(
+        self, 
+        x:torch.Tensor, 
+        boxes:tp.List[torch.Tensor], 
+        # only used during training to indicate presence of other boxes
+        all_boxes:tp.Optional[tp.List[torch.Tensor]] = None
+    ) -> tp.List[torch.Tensor]:
         assert x.ndim == 4
         assert len(x) == len(boxes)
-
-        # MAYBE: pad x, add 4th channel
+        if all_boxes is not None:
+            assert len(boxes) == len(all_boxes)
         
         all_crops = []
         for i, _boxes in enumerate(boxes):
-            crops = crop_tensor_at_boxes(x[i], _boxes, self.masksize, 'bilinear')
+            x_i = x[i]
+
+            if self.boxcanvas:
+                # a forth channel that is added to the input
+                # so that each crop contains other overlapping boxes
+                # to learn not to segment them in crowded areas
+                boxcanvas = torch.zeros(x.shape[-2:], device=x.device)
+                boxes_to_render = all_boxes[i] if all_boxes is not None else _boxes
+                boxcanvas = accumulate_boxes_on_canvas(boxcanvas, boxes_to_render)
+                # -1 to remove the self-box
+                boxcanvas = boxcanvas - 1
+                x_i = torch.cat([x_i, boxcanvas[None]])
+            
+            crops = crop_tensor_at_boxes(x_i, _boxes, self.masksize, 'bilinear')
             all_crops.append(crops)
 
         all_crops_cat = torch.cat(all_crops)      
@@ -75,7 +103,7 @@ class MaskHeadTrainStep(modellib.SaveableModule):
             device  = self._device_indicator.device,
         )
 
-        y    = self.module(x['images'], x['boxes'])
+        y    = self.module(x['images'], x['boxes'], x['all_boxes'])
         y    = torch.cat(y)
         bce_fn = torch.nn.functional.binary_cross_entropy_with_logits
         bce    = bce_fn(y, t)
@@ -121,6 +149,7 @@ def prepare_batch(
     all_images  = []
     all_boxes   = []
     all_targets = []
+    all_extra_boxes = []
 
     for i, item in enumerate(raw_batch):
         x = torch.as_tensor(item[0])
@@ -139,17 +168,20 @@ def prepare_batch(
         assert instancemap.ndim == 2
         # DONT: instancemap = exclude_border_instances(instancemap)
 
-        masks = instancemap_to_masks(instancemap)  # one-hot masks
-        boxes = masks_to_boxes(masks)
-        if len(boxes) > max_masks and augment:
-            indices = torch.randperm(max_masks)
-            boxes   = boxes[indices]
+        masks       = instancemap_to_masks(instancemap)  # one-hot masks
+        boxes       = masks_to_boxes(masks)
+        box_indices = torch.arange(len(boxes), device=boxes.device)
         if augment:
             boxes   = augment_boxes(boxes)
-        targets = instancemap_to_targets(instancemap, boxes, size=masksize)
+        extra_boxes = boxes
+        if len(boxes) > max_masks and augment:
+            box_indices = torch.randperm(len(boxes))[:max_masks]
+            boxes       = boxes[box_indices]
+        targets = instancemap_to_targets(instancemap, boxes, box_indices+1, size=masksize)
 
         all_images.append(x)
         all_boxes.append(boxes.to(device))
+        all_extra_boxes.append(extra_boxes.to(device))
         all_targets.append(targets)
 
     images  = torch.stack(all_images).to(device)
@@ -157,7 +189,7 @@ def prepare_batch(
     # if augment:
     #     # NOTE: jitter should be done on gpu, slow otherwise
     #     inputs = jitter(inputs)
-    return {'images': images, 'boxes':all_boxes}, targets
+    return {'images': images, 'boxes':all_boxes, 'all_boxes':all_extra_boxes}, targets
 
 
 
@@ -307,16 +339,22 @@ def augment_boxes(boxes:torch.Tensor) -> torch.Tensor:
 def instancemap_to_targets(
     instancemap: torch.Tensor, 
     boxes:       torch.Tensor, 
+    box_indices: torch.Tensor,
     size:        int,
 ) -> torch.Tensor:
     assert instancemap.ndim == 2
     assert instancemap.dtype == torch.int64
     assert boxes.ndim == 2
     assert boxes.shape[-1] == 4
+    assert box_indices.dtype == torch.int64
+    assert box_indices.ndim == 1
+    assert len(box_indices) == len(boxes)
+    assert not (box_indices == 0).any(), \
+        'box indices must be incremented by one to match the instancemap values'
 
     crops   = crop_tensor_at_boxes(instancemap, boxes, size, 'nearest')
-    indices = torch.arange(len(crops), device=crops.device) + 1
-    masks   = crops == indices[:, None, None]
+    # indices = torch.arange(len(crops), device=crops.device) + 1
+    masks   = crops == box_indices[:,None,None]
     return masks.float()
 
 
@@ -341,3 +379,25 @@ def box_grids(boxes: torch.Tensor, n: int) -> torch.Tensor:
 
 
 
+def accumulate_boxes_on_canvas(canvas:torch.Tensor, boxes:torch.Tensor) -> torch.Tensor:
+    '''Fill out boxes in the canvas, adding up values. 
+       i.e a pixel that is inside 3 boxes will have value of 3'''
+    y, x = torch.meshgrid(
+        torch.arange(canvas.shape[0], device=canvas.device, dtype=torch.int32),
+        torch.arange(canvas.shape[1], device=canvas.device, dtype=torch.int32),
+        indexing="ij",
+    )
+    inside = (
+          (x >= boxes[:, 0, None, None])
+        & (y >= boxes[:, 1, None, None])
+        & (x <  boxes[:, 2, None, None])
+        & (y <  boxes[:, 3, None, None])
+    )
+    return canvas + inside.sum(dim=0).to(canvas.dtype)
+
+
+def infer_maskhead_kw(module:MaskHead) -> dict:
+    return {
+        'masksize':  module.masksize,
+        'boxcanvas': getattr(module, 'boxcanvas', False),
+    }

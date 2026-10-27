@@ -13,6 +13,7 @@ from src.cells_yolo import (
     create_new_yolo_det_model,
     export_cells_yolo_to_onnx
 )
+from src.cells_yolo_maskhead import infer_maskhead_kw
 from src.treerings_yolo import (
     TreeringsYOLO_CARROT, 
     TreeringsYOLO_Module, 
@@ -68,12 +69,14 @@ def update(args:argparse.Namespace):
             export_onnx_fn = export_treerings_yolo_to_onnx
 
         elif clsname == 'CellsYOLO_CARROT':
-            yolomodel = create_new_yolo_det_model('/tmp', inputsize=800)
-            px_per_mm = m.module.px_per_mm
-            patchsize = m.module.inputsize
-            maskhead  = MaskHead()
-            inference = CellsYOLO_Module(yolomodel, maskhead, px_per_mm).eval()
-            status    = inference.load_state_dict(m.module.state_dict())
+            yolomodel   = create_new_yolo_det_model('/tmp', inputsize=800)
+            px_per_mm   = m.module.px_per_mm
+            patchsize   = m.module.inputsize
+            maskhead_kw = infer_maskhead_kw(m.module.maskhead)
+            print(maskhead_kw)
+            maskhead    = MaskHead(**maskhead_kw)
+            inference   = CellsYOLO_Module(yolomodel, maskhead, px_per_mm).eval()
+            status      = inference.load_state_dict(m.module.state_dict())
             print(status)
             CARROT_cls = CellsYOLO_CARROT
 

@@ -82,7 +82,8 @@ class CellsYOLO_Module(torch.nn.Module):
     def forward(
         self, 
         x: torch.Tensor, 
-        last_layer_tta_rounds: int = 0, 
+        full_tta:              bool  = True,
+        last_layer_tta_rounds: int   = 0, 
         last_layer_tta_noise:  float = 0.25
     ):
         assert x.ndim == 4
@@ -91,6 +92,10 @@ class CellsYOLO_Module(torch.nn.Module):
 
         # pad to avoid misalignment errors
         x = datalib.pad_to_minimum_size(x, self.inputsize)
+
+        if full_tta:
+            xrot = rot90(x, k=1, dims=[-2,-1])
+            x = torch.cat([x, xrot], dim=0)
 
         # output, _  = self.yolomodel(x)
         per_layer_output:tp.List = []
@@ -130,10 +135,25 @@ class CellsYOLO_Module(torch.nn.Module):
             good         = confidence[i] > 0.25
             good_boxes   = boxes[i, good]
             good_scores  = confidence[i, good]
+
+            if full_tta:
+                more_good        = confidence[i+B] > 0.25
+                more_good_boxes  = boxes[i+B, more_good]
+                more_good_boxes  = datalib.rot90_coordinates(more_good_boxes.reshape(-1,2), x.shape[-2:], k=-1).reshape(more_good_boxes.shape)
+                # bug: switch coordinates to ensure topleft-then-bottom-right
+                more_good_boxes  = more_good_boxes[:, [2,1,0,3] ]
+                more_good_scores = confidence[i+B, more_good]
+
+                good_boxes  = torch.cat([good_boxes, more_good_boxes])
+                good_scores = torch.cat([good_scores, more_good_scores])
+
             keep_indices = \
                 torchvision.ops.nms(good_boxes, good_scores, iou_threshold=0.3)
             postnms_boxes = good_boxes[keep_indices]
 
+            keep_indices  = box_overlap_filter(postnms_boxes, max_overlap=0.8)
+            postnms_boxes = postnms_boxes[keep_indices]
+            
             boxmasks = self.maskhead(x[i][None], [postnms_boxes])[0]
 
             fullmasks = \
@@ -157,10 +177,51 @@ def extras_for_yolo(exporter:torch.package.PackageExporter):
     exporter.save_text("ultralytics.extra", "default.yaml", default_config_yaml)
 
 
-def read_image_as_binary(path:str):
-    x = np.array(PIL.Image.open(path).convert('L'))
-    x = (x > 0).astype(int)
-    return x
+def box_overlap_matrix(boxes0:torch.Tensor, boxes1:torch.Tensor) -> torch.Tensor:
+    '''Compute a matrix indicating how much a box j overlaps box i'''
+    assert boxes0.ndim == boxes1.ndim == 2
+    assert boxes0.shape[-1] == 4
+    assert boxes1.shape[-1] == 4
+
+    top_left = torch.maximum(boxes0[:, None, :2], boxes1[None, :, :2])
+    bottom_right = torch.minimum(boxes0[:, None, 2:], boxes1[None, :, 2:])
+
+    intersection = (bottom_right - top_left).clamp(min=0)
+    intersection_area = intersection[..., 0] * intersection[..., 1]
+
+    boxes0_size = (boxes0[:, 2:] - boxes0[:, :2]).clamp(min=0)
+    boxes0_area = boxes0_size[:, 0] * boxes0_size[:, 1]
+
+    return intersection_area / boxes0_area[:, None].clamp(min=1e-8)
+
+def box_overlap_filter(boxes:torch.Tensor, max_overlap:float) -> torch.Tensor:
+    '''Compute a mask to keep boxes after filter out those that are overlapped by others.'''
+    assert boxes.ndim == 2
+    assert boxes.shape[-1] == 4
+
+    overlap_matrix = box_overlap_matrix(boxes, boxes)
+    overlap_matrix = overlap_matrix * (1 - torch.eye(len(boxes), device=boxes.device))
+    
+    #overlapped_boxes = torch.argwhere(overlap_matrix > max_overlap)[:,0]
+    overlapped_boxes = torch.nonzero(overlap_matrix > max_overlap)[:,0]
+    mask = torch.ones(len(boxes), device=boxes.device, dtype=torch.bool)
+    mask[overlapped_boxes] = 0
+
+    return mask
+
+
+def rot90(x:torch.Tensor, k:int, dims=(-2,-1)) -> torch.Tensor:
+    '''torch.rot90 is not exportable to onnx for some reason. reimplemented here.'''
+    k %= 4
+    if k == 0:
+        return x
+    if k == 1:
+        return x.transpose(*dims).flip(dims[0])
+    if k == 2:
+        return x.flip(dims)
+    # k==3:
+    return x.transpose(*dims).flip(dims[1])
+
 
 
 def convert_instance_dataset_for_yolo(dataset:InstanceDataset) -> str:
@@ -318,11 +379,17 @@ def train_yolo_on_cells(
         yolo = ultralytics.YOLO(best_pt)
     else:
         print(f'Re-using YOLO from {reuse_yolo}')
-        yolo = ultralytics.YOLO(reuse_yolo)
         weights_dir  = os.path.join(outputdir, run_name, 'weights')
         weights_path = os.path.join(weights_dir, os.path.basename(reuse_yolo))
         os.makedirs(weights_dir, exist_ok=True)
-        shutil.copy(reuse_yolo, weights_path)
+        if reuse_yolo.endswith('.pt'):
+            yolo = ultralytics.YOLO(reuse_yolo)
+            shutil.copy(reuse_yolo, weights_path)
+        elif reuse_yolo.endswith('.pt.zip'):
+            carrotmodel = modellib.load_model(reuse_yolo)
+            _yolo = carrotmodel.module._yolo[0]
+            yolo  = create_new_yolo_det_model(weights_dir)
+            print(yolo.load_state_dict(_yolo.state_dict()))
 
     dataset = InstanceDataset.from_splitfile(
         splitfile        = splitfile, 

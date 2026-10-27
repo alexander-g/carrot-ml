@@ -387,6 +387,48 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 
 
 
+def IoU_matrix(a:torch.Tensor, b:torch.Tensor, zero_out_zero:bool) -> torch.Tensor:
+    assert a.ndim == b.ndim == 2
+    assert a.shape == b.shape
+    assert a.dtype == b.dtype == torch.int32  # 32 bits required because of .view()
+    assert a.device == b.device
+
+    # ensure labels are sequential
+    a = torch.unique(a, return_inverse=True)[1].to(torch.int32)
+    b = torch.unique(b, return_inverse=True)[1].to(torch.int32)
+
+    uniques_a, counts_a = torch.unique(a, return_counts=True)
+    uniques_b, counts_b = torch.unique(b, return_counts=True)
+    matrix = torch.empty(
+        [len(uniques_a), len(uniques_b)], 
+        dtype  = torch.int64, 
+        device = a.device,
+    )
+
+    # stack and view as int64 for faster processing
+    stacked = torch.stack([a,b], dim=-1).view(torch.int64)
+    uniques_ab, counts_ab = torch.unique(stacked, return_counts=True)
+
+    # back to int32 and labels that overlap are paired [N,2]
+    unstacked = uniques_ab.view(torch.int32).reshape(-1,2)
+
+    intersections_mat = torch.zeros_like(matrix)
+    intersections_mat[unstacked[:,0], unstacked[:,1]] = counts_ab
+
+    unions_mat =  torch.zeros_like(matrix)
+    unions_mat += counts_a[:,None]
+    unions_mat += counts_b[None,:]
+    unions_mat = unions_mat - intersections_mat
+
+    iou_mat = intersections_mat / unions_mat
+    iou_mat[unions_mat == 0] = 0
+
+    if zero_out_zero:
+        iou_mat[uniques_a == 0, :] = 0
+        iou_mat[:, uniques_b == 0] = 0
+
+    return iou_mat
+
 
 
 # y0,x0,y1,x1
@@ -394,11 +436,12 @@ Box = tp.Tuple[int,int,int,int]
 
 
 def relabel_instancemaps(
-    map0:torch.Tensor, 
-    map1:torch.Tensor,
+    map0:        torch.Tensor, 
+    map1:        torch.Tensor,
     overlapbox0: Box,
     overlapbox1: Box,
-    minimum_overlap_pixels:int = 8,
+    next_value:  int,
+    minimum_iou: float = 0.1,
 ) -> torch.Tensor:
     '''Relabel instance map `map1` so that overlapping instances have the same 
        value as in map0. (overlap boxes in format left,top,width,height) '''
@@ -415,16 +458,13 @@ def relabel_instancemaps(
     overlap1 = map1[y1:, x1:][:h1,:w1]
     assert overlap0.shape == overlap1.shape, [overlap0.shape, overlap1.shape]
 
-    mask = (overlap0 > 0) & (overlap1 > 0)
-    overlapping_values = torch.stack([overlap0, overlap1], dim=-1)[mask]
-    overlap_uniques, overlap_counts = \
-        datalib.faster_unique_dim0_with_counts(overlapping_values)
-
-    # filter out too-small overlaps
-    good = (overlap_counts >= minimum_overlap_pixels)
-    overlap_uniques = overlap_uniques[good]
+    iou = IoU_matrix(overlap0, overlap1, zero_out_zero=True)
+    good_iou_indices = torch.argwhere(iou > minimum_iou)
+    overlap_uniques = torch.stack([
+        torch.unique(overlap0)[good_iou_indices[:,0]],
+        torch.unique(overlap1)[good_iou_indices[:,1]]
+    ], dim=-1)
     
-    #adjacency_labels  = connected_components_from_adjacency_list(overlap_uniques)
     # TODO: this is a simplification, rework this properly
     adjacency_labels = \
         torch.cat( [overlap_uniques[:,:1], overlap_uniques[:,:1]], dim=-1 )
@@ -433,7 +473,7 @@ def relabel_instancemaps(
     unchanged_in_map1 = ~torch.isin(map1, overlap_uniques[:,1])
     relabeled_map1 = torch.where( 
         (map1 > 0) & unchanged_in_map1, 
-        relabeled_map1 + map0.max() + 1, 
+        relabeled_map1 + next_value + 1, 
         relabeled_map1 
     )
     return relabeled_map1
@@ -469,6 +509,7 @@ def stitch_and_relabel_instancemaps_from_grid(
 
     grid_rows:tp.List[torch.Tensor] = []
     instancemap_rows:tp.List[torch.Tensor] = []
+    next_value = 1
     for i in range(H):
         for j in range(1, W):
             gridcell0 = grid[i,j-1]
@@ -479,8 +520,9 @@ def stitch_and_relabel_instancemaps_from_grid(
             overlap1  = (x0 - gridcell1[1], y0 - gridcell1[0], w, h)
             instancemap0 = instancemaps[i*W + j-1]
             instancemap1 = instancemaps[i*W + j]
+            next_value = max(next_value, instancemap0.max() + 1)
             instancemap1 = \
-                relabel_instancemaps(instancemap0, instancemap1, overlap0, overlap1)
+                relabel_instancemaps(instancemap0, instancemap1, overlap0, overlap1, next_value)
             instancemaps[i*W + j] = instancemap1
         
         gridcell_row_i = torch.cat([grid[i,0,:2], grid[i,-1,2:]], dim=-1)
@@ -491,6 +533,7 @@ def stitch_and_relabel_instancemaps_from_grid(
         for _q in range(i*W, (i+1)*W):
             instancemaps[_q] = None  # type: ignore
 
+        next_value = 1
         if i > 0:
             gridcell0 = grid_rows[i-1]
             gridcell1 = gridcell_row_i
@@ -503,6 +546,7 @@ def stitch_and_relabel_instancemaps_from_grid(
                 instancemap_row_i,
                 overlap0,
                 overlap1,
+                next_value,
             )
         instancemap_rows.append(instancemap_row_i)
         grid_rows.append(gridcell_row_i)
