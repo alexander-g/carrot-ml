@@ -391,6 +391,7 @@ def IoU_matrix(a:torch.Tensor, b:torch.Tensor, zero_out_zero:bool) -> torch.Tens
     assert a.ndim == b.ndim == 2
     assert a.shape == b.shape
     assert a.dtype == b.dtype == torch.int32  # 32 bits required because of .view()
+    assert a.device == b.device
 
     # ensure labels are sequential
     a = torch.unique(a, return_inverse=True)[1].to(torch.int32)
@@ -398,7 +399,11 @@ def IoU_matrix(a:torch.Tensor, b:torch.Tensor, zero_out_zero:bool) -> torch.Tens
 
     uniques_a, counts_a = torch.unique(a, return_counts=True)
     uniques_b, counts_b = torch.unique(b, return_counts=True)
-    matrix = torch.empty([len(uniques_a), len(uniques_b)], dtype=torch.int64)
+    matrix = torch.empty(
+        [len(uniques_a), len(uniques_b)], 
+        dtype  = torch.int64, 
+        device = a.device,
+    )
 
     # stack and view as int64 for faster processing
     stacked = torch.stack([a,b], dim=-1).view(torch.int64)
