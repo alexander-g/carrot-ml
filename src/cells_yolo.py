@@ -134,6 +134,9 @@ class CellsYOLO_Module(torch.nn.Module):
                 torchvision.ops.nms(good_boxes, good_scores, iou_threshold=0.3)
             postnms_boxes = good_boxes[keep_indices]
 
+            keep_indices  = box_overlap_filter(postnms_boxes, max_overlap=0.8)
+            postnms_boxes = postnms_boxes[keep_indices]
+            
             boxmasks = self.maskhead(x[i][None], [postnms_boxes])[0]
 
             fullmasks = \
@@ -157,10 +160,38 @@ def extras_for_yolo(exporter:torch.package.PackageExporter):
     exporter.save_text("ultralytics.extra", "default.yaml", default_config_yaml)
 
 
-def read_image_as_binary(path:str):
-    x = np.array(PIL.Image.open(path).convert('L'))
-    x = (x > 0).astype(int)
-    return x
+def box_overlap_matrix(boxes0:torch.Tensor, boxes1:torch.Tensor) -> torch.Tensor:
+    '''Compute a matrix indicating how much a box j overlaps box i'''
+    assert boxes0.ndim == boxes1.ndim == 2
+    assert boxes0.shape[-1] == 4
+    assert boxes1.shape[-1] == 4
+
+    top_left = torch.maximum(boxes0[:, None, :2], boxes1[None, :, :2])
+    bottom_right = torch.minimum(boxes0[:, None, 2:], boxes1[None, :, 2:])
+
+    intersection = (bottom_right - top_left).clamp(min=0)
+    intersection_area = intersection[..., 0] * intersection[..., 1]
+
+    boxes0_size = (boxes0[:, 2:] - boxes0[:, :2]).clamp(min=0)
+    boxes0_area = boxes0_size[:, 0] * boxes0_size[:, 1]
+
+    return intersection_area / boxes0_area[:, None].clamp(min=1e-8)
+
+def box_overlap_filter(boxes:torch.Tensor, max_overlap:float) -> torch.Tensor:
+    '''Compute a mask to keep boxes after filter out those that are overlapped by others.'''
+    assert boxes.ndim == 2
+    assert boxes.shape[-1] == 4
+
+    overlap_matrix = box_overlap_matrix(boxes, boxes)
+    overlap_matrix = overlap_matrix * (1 - torch.eye(len(boxes), device=boxes.device))
+    
+    #overlapped_boxes = torch.argwhere(overlap_matrix > max_overlap)[:,0]
+    overlapped_boxes = torch.nonzero(overlap_matrix > max_overlap)[:,0]
+    mask = torch.ones(len(boxes), device=boxes.device, dtype=torch.bool)
+    mask[overlapped_boxes] = 0
+
+    return mask
+
 
 
 def convert_instance_dataset_for_yolo(dataset:InstanceDataset) -> str:

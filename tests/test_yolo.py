@@ -1,7 +1,13 @@
 import os
 import tempfile
 
-from src.cells_yolo import CellsYOLO_Module, CellsYOLO_Module, MaskRCNN_Cells_CARROT
+from src.cells_yolo import (
+    CellsYOLO_Module, 
+    CellsYOLO_Module, 
+    MaskRCNN_Cells_CARROT,
+    box_overlap_matrix,
+    box_overlap_filter,
+)
 from src.cells_yolo_maskhead import MaskHead
 from src.treerings_yolo import TreeringsYOLO_Module, Treerings_CARROT, TreeringsInference
 from src.maskrcnn_celldetection import stitch_and_relabel_instancemaps_from_grid
@@ -102,5 +108,46 @@ def test_stitch_and_relabel_instancemaps_from_grid_bug():
 
     output0 = stitch_and_relabel_instancemaps_from_grid(instancemaps, grid, slack=10)
     assert len( np.unique(output0.numpy()) ) == len( [0,1,2,3,4,5,6,7,8] )
+
+
+def test_box_overlap_matrix():
+    boxes0 = torch.stack([
+        torch.tensor([10,10, 40,40]),
+        torch.tensor([10,10, 100,100]),
+        torch.tensor([200,200,250,250])
+    ])
+
+    output0 = box_overlap_matrix(boxes0, boxes0)
+    assert output0.shape == (len(boxes0), len(boxes0))
+    # box1 fully overlaps box0
+    assert output0[0,1] == 1
+    # box0 partially overlaps box1
+    assert 0 < output0[1,0] < 1
+    assert output0[0,2] == 0
+
+
+
+    # empty
+    output1 = box_overlap_matrix(boxes0[:0], boxes0)
+    assert output1.shape == (0,len(boxes0))
+    
+    output2 = box_overlap_matrix(boxes0[:0], boxes0[:0])
+    assert output2.shape == (0,0)
+
+def test_box_overlap_filter():
+    boxes0 = torch.stack([
+        torch.tensor([10,10, 40,40]),
+        torch.tensor([10,10, 100,100]),
+        torch.tensor([200,200,250,250])
+    ])
+
+    output0 = box_overlap_filter(boxes0, 0.5)
+    assert output0.shape == (len(boxes0),)
+    assert output0.dtype == torch.bool
+
+    assert not output0[0]
+    assert output0[1]
+    assert output0[2]
+
 
 
