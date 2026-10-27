@@ -94,7 +94,7 @@ class CellsYOLO_Module(torch.nn.Module):
         x = datalib.pad_to_minimum_size(x, self.inputsize)
 
         if full_tta:
-            xrot = torch.rot90(x, k=1, dims=[-2,-1])
+            xrot = rot90(x, k=1, dims=[-2,-1])
             x = torch.cat([x, xrot], dim=0)
 
         # output, _  = self.yolomodel(x)
@@ -208,6 +208,19 @@ def box_overlap_filter(boxes:torch.Tensor, max_overlap:float) -> torch.Tensor:
     mask[overlapped_boxes] = 0
 
     return mask
+
+
+def rot90(x:torch.Tensor, k:int, dims=(-2,-1)) -> torch.Tensor:
+    '''torch.rot90 is not exportable to onnx for some reason. reimplemented here.'''
+    k %= 4
+    if k == 0:
+        return x
+    if k == 1:
+        return x.transpose(*dims).flip(dims[0])
+    if k == 2:
+        return x.flip(dims)
+    # k==3:
+    return x.transpose(*dims).flip(dims[1])
 
 
 
