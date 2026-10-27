@@ -82,7 +82,8 @@ class CellsYOLO_Module(torch.nn.Module):
     def forward(
         self, 
         x: torch.Tensor, 
-        last_layer_tta_rounds: int = 0, 
+        full_tta:              bool  = True,
+        last_layer_tta_rounds: int   = 0, 
         last_layer_tta_noise:  float = 0.25
     ):
         assert x.ndim == 4
@@ -91,6 +92,10 @@ class CellsYOLO_Module(torch.nn.Module):
 
         # pad to avoid misalignment errors
         x = datalib.pad_to_minimum_size(x, self.inputsize)
+
+        if full_tta:
+            xrot = torch.rot90(x, k=1, dims=[-2,-1])
+            x = torch.cat([x, xrot], dim=0)
 
         # output, _  = self.yolomodel(x)
         per_layer_output:tp.List = []
@@ -130,6 +135,18 @@ class CellsYOLO_Module(torch.nn.Module):
             good         = confidence[i] > 0.25
             good_boxes   = boxes[i, good]
             good_scores  = confidence[i, good]
+
+            if full_tta:
+                more_good        = confidence[i+B] > 0.25
+                more_good_boxes  = boxes[i+B, more_good]
+                more_good_boxes  = datalib.rot90_coordinates(more_good_boxes.reshape(-1,2), x.shape[-2:], k=-1).reshape(more_good_boxes.shape)
+                # bug: switch coordinates to ensure topleft-then-bottom-right
+                more_good_boxes  = more_good_boxes[:, [2,1,0,3] ]
+                more_good_scores = confidence[i+B, more_good]
+
+                good_boxes  = torch.cat([good_boxes, more_good_boxes])
+                good_scores = torch.cat([good_scores, more_good_scores])
+
             keep_indices = \
                 torchvision.ops.nms(good_boxes, good_scores, iou_threshold=0.3)
             postnms_boxes = good_boxes[keep_indices]
