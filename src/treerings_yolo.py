@@ -139,7 +139,7 @@ def train_yolo_on_treerings(
     if not verbose:
         ultralytics.utils.set_logging('ultralytics', verbose)
     
-    model = create_dataset_for_yolo(weightsfile)
+    model = create_new_yolo_sem_model(weightsfile)
     if progress_callback is not None:
         on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
         model.add_callback("on_train_epoch_end", on_epoch_end)
