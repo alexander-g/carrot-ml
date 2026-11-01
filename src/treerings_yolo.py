@@ -368,12 +368,14 @@ def start_training_from_carrot(
     steps:             tp.Optional[int] = None,
     progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
     weightsfile:       tp.Optional[str] = None,
+    _min_epochs:       int = 25,
 ) -> Treerings_CARROT:
     batchsize = 4
-    assert epochs is not None or steps is not None
+    assert (epochs is None) != (steps is None)
     if epochs is None:
         epochs = int( np.ceil(steps / (len(filepairs) / batchsize)) )
-        epochs = max(epochs, 25)
+        epochs = max(epochs, _min_epochs)
+    
     splitfile = os.path.join(cachedir, 'dataset.yaml')
     datalib.save_file_tuples(splitfile, filepairs)
     patchsize = HARDCODED_DEFAULT_PATCHSIZE
