@@ -197,6 +197,7 @@ def masks_to_instancemap(
     masks:           torch.Tensor, 
     threshold:       float = 0.5,
     remove_overlaps: bool = False,
+    split_overlaps:  bool = False,
     largest_only:    bool = False,
 ) -> torch.Tensor:
     '''Convert masks as returned by Mask-RCNN (shape [N,1,H,W]) to a [H,W]
@@ -210,6 +211,8 @@ def masks_to_instancemap(
     masks = (masks > threshold)
     if not torch.jit.is_scripting() and largest_only:
         masks = keep_largest_object(masks)
+    if split_overlaps:
+        masks = split_overlapping_masks(masks)
     if remove_overlaps:
         overlaps = torch.sum(masks, dim=0, keepdim=True) > 1
         masks    = masks * ~overlaps
@@ -218,6 +221,107 @@ def masks_to_instancemap(
         torch.arange(1, n+1, device=masks.device, dtype=torch.int32)
     instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
     return instances
+
+
+def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
+    '''Given individual masks (shape [N,H,W]) split areas overlapped by 2 masks
+       into two, with pixels assigned to the closest mask.
+       Will remove areas overlapped by 3 or more masks. '''
+    assert masks.ndim == 3
+    assert masks.dtype == torch.bool
+
+    # removing 3-overlaps, for simplicity
+    overlaps = torch.sum(masks, dim=0, keepdim=True) >= 3
+    masks    = masks * ~overlaps
+
+    # only 2-overlaps left
+    overlaps = torch.sum(masks, dim=0, keepdim=False) == 2  # [H,W]
+    # overlap pixel coordinates
+    indices  = torch.argwhere(overlaps) # [M,2]
+    
+    # N-channel pixels
+    overlap_pixels = masks[:, indices[:,0], indices[:,1]] # [N,M]
+    # must have exactly 2 positive values per pixel
+    mask_index_per_pixel = torch.topk(overlap_pixels.float(), k=2, dim=0).indices # [2,M]
+    
+    # a unique integer for each overlap, assuming we have less than 2^32 pixels
+    overlap_labels = mask_index_per_pixel.to(torch.int32).T.ravel().view(torch.int64)
+    # optional, relabel to range [0,G)
+    overlap_labels = torch.unique(overlap_labels, return_inverse=True)[1] # [M]
+
+    # center of each mask
+    centroids = mask_centroids(masks) # [N,2]
+
+    # distances from mask center to corresponding overlap pixels
+    distances = torch.linalg.vector_norm(
+        centroids[mask_index_per_pixel, :]           # [2,M,2]
+        - torch.stack([indices, indices], dim=0),    # [2,M,2]
+        dim = -1
+    ) # [2,M]
+
+    # for each overlap and corresponding mask, find the pixel closest to the mask
+    overlap_start0 = indices[groupwise_argmin(distances[0], overlap_labels)] # [G,2]
+    overlap_start1 = indices[groupwise_argmin(distances[1], overlap_labels)] # [G,2]
+
+    # compute the distance for each overlap pixel to this point
+    n_pixels_per_overlap = torch.unique(overlap_labels, return_counts=True)[1] # [G]
+    distances0 = torch.linalg.vector_norm(
+        torch.repeat_interleave(overlap_start0, n_pixels_per_overlap, dim=0) # [M,2]
+        - indices.float(),
+        dim = -1
+    )
+    distances1 = torch.linalg.vector_norm(
+        torch.repeat_interleave(overlap_start1, n_pixels_per_overlap, dim=0) # [M,2]
+        - indices.float(),
+        dim = -1
+    )
+
+    # for each overlap pixel, decide which mask to use
+    mask_per_pixel = mask_index_per_pixel[
+        torch.stack([distances0, distances1], dim=0).argmin(0),
+        torch.arange( mask_index_per_pixel.shape[1] )
+    ] # [M]
+
+
+    output = masks.clone()
+    output[:, indices[:,0], indices[:,1]] = 0
+    output[mask_per_pixel, indices[:,0], indices[:,1]] = 1
+
+    return output
+
+
+
+def groupwise_argmin(x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    assert x.ndim == 1
+    assert labels.shape == x.shape
+    assert labels.dtype == torch.int64
+
+    # assuming every group is represented at least once
+    n = x.shape[0]
+    G = int(labels.max() + 1)
+    groups  = torch.arange(G, device=labels.device, dtype=labels.dtype)
+    matches = labels[None] == groups[:,None]  # [G, N]
+    masked  = torch.where(matches, x[None], torch.inf)
+    return masked.argmin(dim=1)  # [G], indices into x (int64)
+
+def mask_centroids(masks:torch.Tensor) -> torch.Tensor:
+    '''Compute the centroids of individual masks (shape[N,H,W]). 
+       Return value of shape [N,2], float32, y first x second. '''
+    assert masks.ndim == 3
+    assert masks.dtype == torch.bool
+
+    h, w = masks.shape[1:]
+    ys = torch.arange(h, device=masks.device, dtype=torch.float32)
+    xs = torch.arange(w, device=masks.device, dtype=torch.float32)
+
+    masks_f32 = masks.to(torch.float32)
+    counts = masks_f32.sum(dim=(1, 2)).clamp(min=1)
+
+    cy = (masks_f32.sum(dim=2) * ys).sum(dim=1) / counts
+    cx = (masks_f32.sum(dim=1) * xs).sum(dim=1) / counts
+
+    return torch.stack((cy, cx), dim=1)
+
 
 
 def keep_largest_object(masks:torch.Tensor) -> torch.Tensor:
