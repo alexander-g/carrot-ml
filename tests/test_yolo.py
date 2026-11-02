@@ -186,4 +186,10 @@ def test_split_overlaps():
     output2 = split_overlapping_masks(masks2)
     # just dont fail
 
-    
+    # agent says it fails with one mask:
+    masks3 = torch.zeros([3,100,100], dtype=torch.bool)
+    masks3[0,10:30, 10:30] = 1
+
+    output3 = split_overlapping_masks(masks3)
+    assert output3.sum(0).max() == 1
+    # nope no issues

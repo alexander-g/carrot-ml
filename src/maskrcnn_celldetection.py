@@ -245,7 +245,9 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     mask_index_per_pixel = torch.topk(overlap_pixels.float(), k=2, dim=0).indices # [2,M]
     
     # a unique integer for each overlap, assuming we have less than 2^32 pixels
-    overlap_labels = mask_index_per_pixel.to(torch.int32).T.reshape(-1).view(torch.int64)
+    overlap_labels = (
+        mask_index_per_pixel[0] * masks.shape[0] + mask_index_per_pixel[1]
+    )
     # optional, relabel to range [0,G)
     overlap_labels = torch.unique(overlap_labels, return_inverse=True)[1] # [M]
 
@@ -266,20 +268,18 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     # compute the distance for each overlap pixel to this point
     n_pixels_per_overlap = torch.unique(overlap_labels, return_counts=True)[1] # [G]
     distances0 = torch.linalg.vector_norm(
-        torch.repeat_interleave(overlap_start0, n_pixels_per_overlap, dim=0) # [M,2]
-        - indices.float(),
-        dim = -1
+        overlap_start0[overlap_labels] - indices.float(),
+        dim = -1,
     )
     distances1 = torch.linalg.vector_norm(
-        torch.repeat_interleave(overlap_start1, n_pixels_per_overlap, dim=0) # [M,2]
-        - indices.float(),
-        dim = -1
+        overlap_start1[overlap_labels] - indices.float(),
+        dim = -1,
     )
 
     # for each overlap pixel, decide which mask to use
     mask_per_pixel = mask_index_per_pixel[
         torch.stack([distances0, distances1], dim=0).argmin(0),
-        torch.arange( mask_index_per_pixel.shape[1] )
+        torch.arange( mask_index_per_pixel.shape[1], device=masks.device )
     ] # [M]
 
 
