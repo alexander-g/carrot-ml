@@ -237,7 +237,7 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     # only 2-overlaps left
     overlaps = torch.sum(masks, dim=0, keepdim=False) == 2  # [H,W]
     # overlap pixel coordinates
-    indices  = torch.argwhere(overlaps) # [M,2]
+    indices  = torch.nonzero(overlaps) # [M,2]
     
     # N-channel pixels
     overlap_pixels = masks[:, indices[:,0], indices[:,1]] # [N,M]
@@ -245,7 +245,7 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     mask_index_per_pixel = torch.topk(overlap_pixels.float(), k=2, dim=0).indices # [2,M]
     
     # a unique integer for each overlap, assuming we have less than 2^32 pixels
-    overlap_labels = mask_index_per_pixel.to(torch.int32).T.ravel().view(torch.int64)
+    overlap_labels = mask_index_per_pixel.to(torch.int32).T.reshape(-1).view(torch.int64)
     # optional, relabel to range [0,G)
     overlap_labels = torch.unique(overlap_labels, return_inverse=True)[1] # [M]
 
@@ -290,11 +290,14 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     return output
 
 
-
+@torch.jit.script_if_tracing
 def groupwise_argmin(x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     assert x.ndim == 1
     assert labels.shape == x.shape
     assert labels.dtype == torch.int64
+
+    if labels.shape[0] == 0:
+        return torch.empty([0], dtype=torch.int64, device=x.device)
 
     # assuming every group is represented at least once
     n = x.shape[0]

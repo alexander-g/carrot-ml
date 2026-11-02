@@ -171,3 +171,19 @@ def test_split_overlaps():
     assert output0[0, 24,24] == 1
     assert output0[1, 26,26] == 1
     
+
+    # bug: no overlaps
+    masks1 = torch.zeros([3,100,100], dtype=torch.bool)
+    masks1[0,10:30, 10:30] = 1
+    masks1[1,30:50, 30:50] = 1
+    masks1[1,50:90, 50:90] = 1
+
+    output1 = split_overlapping_masks(masks1)
+    assert output1.sum(0).max() == 1
+
+    # no masks
+    masks2 = torch.zeros([3, 100, 100], dtype=torch.bool)
+    output2 = split_overlapping_masks(masks2)
+    # just dont fail
+
+    
