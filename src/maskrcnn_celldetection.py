@@ -222,13 +222,16 @@ def masks_to_instancemap(
     instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
     return instances
 
-
+@torch.jit.script_if_tracing
 def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     '''Given individual masks (shape [N,H,W]) split areas overlapped by 2 masks
        into two, with pixels assigned to the closest mask.
        Will remove areas overlapped by 3 or more masks. '''
     assert masks.ndim == 3
     assert masks.dtype == torch.bool
+
+    if masks.shape[0] < 2:
+        return masks
 
     # removing 3-overlaps, for simplicity
     overlaps = torch.sum(masks, dim=0, keepdim=True) >= 3
