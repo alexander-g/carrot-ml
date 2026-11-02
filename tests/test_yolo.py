@@ -10,7 +10,10 @@ from src.cells_yolo import (
 )
 from src.cells_yolo_maskhead import MaskHead
 from src.treerings_yolo import TreeringsYOLO_Module, Treerings_CARROT, TreeringsInference
-from src.maskrcnn_celldetection import stitch_and_relabel_instancemaps_from_grid
+from src.maskrcnn_celldetection import (
+    stitch_and_relabel_instancemaps_from_grid,
+    split_overlapping_masks,
+)
 
 import numpy as np
 import ultralytics
@@ -151,3 +154,42 @@ def test_box_overlap_filter():
 
 
 
+def test_split_overlaps():
+    masks0 = torch.zeros([3, 100,100], dtype=torch.bool)
+    masks0[0, 10:30, 10:30] = 1
+    masks0[1, 20:50, 20:50] = 1
+    masks0[2, 40:90, 20:50] = 1
+
+    output0 = split_overlapping_masks(masks0)
+    assert output0.shape == masks0.shape
+    assert output0.sum(0).max() == 1
+    
+    assert (output0[1, 20:45, 30:50] == 1).all()
+    assert (output0[2, 45:90, 20:50] == 1).all()
+
+    assert output0[0, 20,20] == 1
+    assert output0[0, 24,24] == 1
+    assert output0[1, 26,26] == 1
+    
+
+    # bug: no overlaps
+    masks1 = torch.zeros([3,100,100], dtype=torch.bool)
+    masks1[0,10:30, 10:30] = 1
+    masks1[1,30:50, 30:50] = 1
+    masks1[1,50:90, 50:90] = 1
+
+    output1 = split_overlapping_masks(masks1)
+    assert output1.sum(0).max() == 1
+
+    # no masks
+    masks2 = torch.zeros([3, 100, 100], dtype=torch.bool)
+    output2 = split_overlapping_masks(masks2)
+    # just dont fail
+
+    # agent says it fails with one mask:
+    masks3 = torch.zeros([1,100,100], dtype=torch.bool)
+    masks3[0,10:30, 10:30] = 1
+
+    output3 = split_overlapping_masks(masks3)
+    assert output3.sum(0).max() == 1
+    # nope no issues

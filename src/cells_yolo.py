@@ -163,7 +163,8 @@ class CellsYOLO_Module(torch.nn.Module):
             instancemap = masks_to_instancemap(
                 fullmasks[:,None], 
                 largest_only    = False,   # redundant with the new mask head
-                remove_overlaps = True,
+                remove_overlaps = True,    # redundant with split_overlaps
+                split_overlaps  = True,
             )
 
             outputs.append({'instances': instancemap})
