@@ -7,10 +7,6 @@ from src.cells_yolo import train_yolo_on_cells, HARDCODED_DEFAULT_PATCHSIZE
 
 
 def main(args:args.Namespace):
-
-    if args.pretrained is None:
-        print('No pretrained model provided.')
-
     train_yolo_on_cells(
         splitfile         = args.trainsplit,
         px_per_mm         = args.px_per_mm,
@@ -20,6 +16,8 @@ def main(args:args.Namespace):
         weightsfile       = args.pretrained,
         progress_callback = None,
         reuse_yolo        = args.reuse_yolo,
+        reuse_maskhead    = args.reuse_maskhead,
+        suffix            = args.suffix,
     )
 
 
@@ -43,7 +41,15 @@ def get_argparser() -> argparse.ArgumentParser:
         '--reuse-yolo', 
         help = 'Path to previously trained yolo model. Will not train if provided.'
     )
-    parser.add_argument('--pretrained', help='Path to pretrained yolo model')
+    parser.add_argument(
+        '--reuse-maskhead', 
+        help = 'Path to previously trained mask head. Will not train if provided.'
+    )
+    parser.add_argument(
+        '--pretrained', 
+        required = True, # can be "none" but user must explicitly specify
+        help     = 'Path to pretrained yolo model as starting point, or "none"'
+    )
     return parser
 
 if __name__ == '__main__':
