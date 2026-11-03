@@ -1,12 +1,21 @@
 import argparse
+import sys
 
 import torch
 
 from traininglib import args, trainingloop
 from src.cells_yolo import train_yolo_on_cells, HARDCODED_DEFAULT_PATCHSIZE
+from src.util import verify_reproducibility
 
 
 def main(args:args.Namespace):
+    if not args.allow_dirty:
+        errors = verify_reproducibility(args)
+        if errors:
+            for err in errors:
+                print(err)
+            sys.exit(1)
+
     pretrained = args.pretrained
     if pretrained.lower() == 'none':
         pretrained = None
@@ -55,6 +64,11 @@ def get_argparser() -> argparse.ArgumentParser:
         '--pretrained', 
         required = True, # can be "none" but user must explicitly specify
         help     = 'Path to pretrained yolo model as starting point, or "none"'
+    )
+    parser.add_argument(
+        '--allow-dirty',
+        action = 'store_true',
+        help   = 'Skip reproducibility checks',
     )
     return parser
 

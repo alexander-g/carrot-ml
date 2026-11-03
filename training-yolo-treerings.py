@@ -1,13 +1,22 @@
 import argparse
+import sys
 import time
 
 import torch
 
 from traininglib import args, trainingloop
 from src.treerings_yolo import create_dataset_for_yolo, train_yolo_on_treerings
+from src.util import verify_reproducibility
 
 
 def main(args:args.Namespace):
+    if not args.allow_dirty:
+        errors = verify_reproducibility(args)
+        if errors:
+            for err in errors:
+                print(err)
+            sys.exit(1)
+
     dataset_yaml = create_dataset_for_yolo(
         args.trainsplit, 
         patchsize = args.inputsize, 
@@ -48,6 +57,11 @@ def get_argparser() -> argparse.ArgumentParser:
         '--pretrained', 
         required = True, # can be "none" but user must explicitly specify
         help     = 'Path to pretrained yolo model as starting point, or "none"'
+    )
+    parser.add_argument(
+        '--allow-dirty',
+        action = 'store_true',
+        help   = 'Skip reproducibility checks',
     )
     return parser
 

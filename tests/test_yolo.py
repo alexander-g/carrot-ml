@@ -193,3 +193,89 @@ def test_split_overlaps():
     output3 = split_overlapping_masks(masks3)
     assert output3.sum(0).max() == 1
     # nope no issues
+
+
+def test_verify_reproducibility(monkeypatch, tmp_path):
+    import argparse
+    import importlib
+    import subprocess
+    from src import util
+
+    repo_dir = str(tmp_path / 'repo')
+    data_dir = str(tmp_path / 'data')
+    edit_dir = str(tmp_path / 'traininglib')
+    os.makedirs(repo_dir)
+    os.makedirs(data_dir)
+    os.makedirs(edit_dir)
+
+    req_file = os.path.join(repo_dir, 'requirements.frozen.txt')
+    frozen = (
+        'numpy==2.3.3\n'
+        '-e git+https://github.com/alexander-g/traininglib'
+        '@8921c3f195355c9182069ce82a1febb4e9d7a304#egg=traininglib\n'
+    )
+    with open(req_file, 'w') as f:
+        f.write(frozen)
+
+    versions = {
+        os.path.realpath(repo_dir): '2026-11-03:aaaa',
+        os.path.realpath(data_dir): '2026-11-03:bbbb',
+        os.path.realpath(edit_dir): '2026-11-03:8921c3f195355c9182069ce82a1febb4e9d7a304',
+    }
+    monkeypatch.setattr(util, 'git_version', lambda p: versions.get(os.path.realpath(p)))
+    monkeypatch.setattr(subprocess, 'check_output', lambda *a, **kw: frozen)
+
+    class DummyMod:
+        __file__ = os.path.join(edit_dir, 'traininglib', '__init__.py')
+
+    monkeypatch.setattr(importlib, 'import_module', lambda name: DummyMod)
+    monkeypatch.chdir(repo_dir)
+
+    clean_args = argparse.Namespace(
+        trainsplit     = os.path.join(data_dir, 'split.txt'),
+        reuse_yolo     = None,
+        reuse_maskhead = None,
+    )
+
+    # 1. Expected use: clean repo, dataset, freeze, and args
+    assert util.verify_reproducibility(clean_args) == []
+
+    # 2. Failure cases: dirty repo, non-repo dataset, dirty dataset, pip mismatch, editable dirty
+    versions[os.path.realpath(repo_dir)] = '2026-11-03:aaaa-dirty'
+    assert len(util.verify_reproducibility(clean_args)) > 0
+    versions[os.path.realpath(repo_dir)] = '2026-11-03:aaaa'
+
+    versions[os.path.realpath(data_dir)] = None
+    assert len(util.verify_reproducibility(clean_args)) > 0
+    versions[os.path.realpath(data_dir)] = '2026-11-03:bbbb-dirty'
+    assert len(util.verify_reproducibility(clean_args)) > 0
+    versions[os.path.realpath(data_dir)] = '2026-11-03:bbbb'
+
+    versions[os.path.realpath(edit_dir)] = '2026-11-03:8921c3f-dirty'
+    assert len(util.verify_reproducibility(clean_args)) > 0
+    versions[os.path.realpath(edit_dir)] = '2026-11-03:8921c3f195355c9182069ce82a1febb4e9d7a304'
+
+    monkeypatch.setattr(subprocess, 'check_output', lambda *a, **kw: 'numpy==1.0.0\n')
+    assert len(util.verify_reproducibility(clean_args)) > 0
+    monkeypatch.setattr(subprocess, 'check_output', lambda *a, **kw: frozen)
+
+    # 3. Edge cases: --reuse-yolo / --reuse-maskhead provided, or missing on treerings parser
+    reuse_yolo_args = argparse.Namespace(
+        trainsplit     = os.path.join(data_dir, 'split.txt'),
+        reuse_yolo     = 'model.pt',
+        reuse_maskhead = None,
+    )
+    assert len(util.verify_reproducibility(reuse_yolo_args)) > 0
+
+    reuse_mh_args = argparse.Namespace(
+        trainsplit     = os.path.join(data_dir, 'split.txt'),
+        reuse_yolo     = None,
+        reuse_maskhead = 'mh.pt.zip',
+    )
+    assert len(util.verify_reproducibility(reuse_mh_args)) > 0
+
+    treerings_args = argparse.Namespace(
+        trainsplit = os.path.join(data_dir, 'split.txt'),
+    )
+    assert util.verify_reproducibility(treerings_args) == []
+

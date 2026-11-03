@@ -1,7 +1,9 @@
 import datetime
 import hashlib
+import importlib
 import os
 import subprocess
+import sys
 import typing as tp
 
 import numpy as np
@@ -154,4 +156,55 @@ def git_version(folder: str) -> str|None:
         return f"{date}:{commit_hash}{'-dirty' if dirty else ''}"
     except subprocess.CalledProcessError:
         return None
+
+
+def verify_reproducibility(args: tp.Any) -> list[str]:
+    '''Verify repo, dataset, environment, and cli arguments for reproducibility.'''
+    errors: list[str] = []
+
+    repo_version: str | None = git_version('.')
+    if repo_version is None or repo_version.endswith('-dirty'):
+        errors.append(f'Current repository is dirty or not a git repository: {repo_version}')
+
+    dataset_dir: str = os.path.dirname(args.trainsplit) or '.'
+    dataset_version: str | None = git_version(dataset_dir)
+    if dataset_version is None or dataset_version.endswith('-dirty'):
+        errors.append(f'Dataset repository is dirty or not a git repository: {dataset_version}')
+
+    try:
+        frozen: str = open('requirements.frozen.txt').read().strip()
+        installed: str = subprocess.check_output(
+            [sys.executable, '-m', 'pip', 'freeze'],
+            text = True,
+        ).strip()
+    except Exception as exc:
+        errors.append(f'Failed to check pip freeze: {exc}')
+        frozen, installed = '', ''
+
+    if frozen and installed != frozen:
+        errors.append('pip freeze does not match requirements.frozen.txt')
+
+    for line in installed.splitlines():
+        if not line.startswith('-e ') or '#egg=' not in line:
+            continue
+        pkg: str = line.split('#egg=')[-1].split('&')[0].strip()
+        try:
+            mod_file: str | None = getattr(importlib.import_module(pkg), '__file__', None)
+            if mod_file is None:
+                errors.append(f'Editable package {pkg} has no __file__')
+                continue
+            pkg_repo: str = os.path.dirname(os.path.dirname(os.path.realpath(mod_file)))
+            pkg_version: str | None = git_version(pkg_repo)
+            if pkg_version is None or pkg_version.endswith('-dirty'):
+                errors.append(f'Editable package {pkg} is dirty: {pkg_version}')
+        except Exception as exc:
+            errors.append(f'Failed to check editable package {pkg}: {exc}')
+
+    if getattr(args, 'reuse_yolo', None) is not None:
+        errors.append('--reuse-yolo is provided')
+    if getattr(args, 'reuse_maskhead', None) is not None:
+        errors.append('--reuse-maskhead is provided')
+
+    return errors
+
 
