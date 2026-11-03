@@ -401,31 +401,3 @@ def start_training_from_carrot(
 
 
 
-if __name__ == '__main__':
-    import os
-    import glob
-    import PIL.Image
-
-    m = ultralytics.YOLO('ultralytics/runs/semantic/train-16/weights/best.pt')
-    inputsize = m.args['imgsz']
-
-    #module = TreeringsYOLO_Module(m, px_per_mm=250*inputsize/1024).eval()
-    module = TreeringsYOLO_Module(m, px_per_mm=150).eval()
-    model  = Treerings_CARROT(TreeringsInference(module, patchsize=inputsize))
-    
-    # imf = 'data/2026-06-29_bw-rings+extra-250/inputs/001_250px-per-mm.png'
-    # output = model.process_image(imf, px_per_mm=250, progress_callback=print)
-
-
-    outputdir = 'DEBUG/2026-08-19_yolo-inference/2026-08-23_rings-250pxpermm'
-    os.makedirs(outputdir, exist_ok=True)
-    for f in glob.glob('data/2026-06-29_bw-rings+extra-250/inputs/*'):
-        print(f)
-        output = model.process_image(f, px_per_mm=250, progress_callback=print, batchsize=1)
-        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
-        print()
-
-    print('done')
-
-
-

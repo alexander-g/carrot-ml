@@ -7,13 +7,19 @@ from src.cells_yolo import train_yolo_on_cells, HARDCODED_DEFAULT_PATCHSIZE
 
 
 def main(args:args.Namespace):
+    pretrained = args.pretrained
+    if pretrained.lower() == 'none':
+        pretrained = None
+        if args.reuse_yolo is None:
+            print('No pretrained model provided.')
+
     train_yolo_on_cells(
         splitfile         = args.trainsplit,
         px_per_mm         = args.px_per_mm,
         inputsize         = args.inputsize,
         batchsize         = args.batchsize,
         epochs            = args.epochs,
-        weightsfile       = args.pretrained,
+        weightsfile       = pretrained,
         progress_callback = None,
         reuse_yolo        = args.reuse_yolo,
         reuse_maskhead    = args.reuse_maskhead,

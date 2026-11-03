@@ -15,13 +15,16 @@ def main(args:args.Namespace):
         outputdir = './cache/',
     )
 
-    if args.pretrained is None:
+    pretrained = args.pretrained
+    if args.pretrained.lower() == 'none':
         print('No pretrained model provided.')
+        pretrained = None
+    
     carrotmodel = train_yolo_on_treerings(
         dataset_yaml, 
         epochs      = args.epochs, 
         inputsize   = args.inputsize, 
-        weightsfile = args.pretrained, 
+        weightsfile = pretrained, 
         verbose     = True
     )
 
@@ -41,7 +44,11 @@ def get_argparser() -> argparse.ArgumentParser:
         help = 'Image resolution',
         required = True, 
     )
-    parser.add_argument('--pretrained', help='Path to pretrained yolo model')
+    parser.add_argument(
+        '--pretrained', 
+        required = True, # can be "none" but user must explicitly specify
+        help     = 'Path to pretrained yolo model as starting point, or "none"'
+    )
     return parser
 
 if __name__ == '__main__':
