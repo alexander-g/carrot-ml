@@ -279,3 +279,58 @@ def test_verify_reproducibility(monkeypatch, tmp_path):
     )
     assert util.verify_reproducibility(treerings_args) == []
 
+
+def test_per_file_px_per_mm(tmp_path):
+    import pytest
+    from traininglib import datalib
+    from src.maskrcnn_celldetection import InstanceDataset
+    from src.treeringmodel import TreeringsDataset
+    from src.util import resolve_px_per_mm
+
+    im0 = str(tmp_path / 'im0.png')
+    an0 = str(tmp_path / 'an0.png')
+    im1 = str(tmp_path / 'im1.png')
+    an1 = str(tmp_path / 'an1.png')
+    for p in (im0, im1):
+        PIL.Image.new('RGB', (100, 100)).save(p)
+    for p in (an0, an1):
+        PIL.Image.new('L', (100, 100)).save(p)
+
+    splitfile = str(tmp_path / 'split.csv')
+    datalib.save_file_tuples(splitfile, [(im0, an0), (im1, an1)])
+
+    pxfile = str(tmp_path / 'px_per_mm.txt')
+    with open(pxfile, 'w') as f:
+        f.write('im0.png:500\nim1.png:1000\n')
+
+    # 1. Expected use: per-file px_per_mm from file on both datasets
+    ds_cells = InstanceDataset.from_splitfile(
+        splitfile        = splitfile,
+        patchsize        = 50,
+        px_per_mm        = pxfile,
+        target_px_per_mm = 500,
+        cachedir         = str(tmp_path / 'cache_cells'),
+    )
+    assert len(ds_cells) == 2
+
+    ds_rings = TreeringsDataset.from_splitfile(
+        splitfile        = splitfile,
+        patchsize        = 50,
+        px_per_mm        = pxfile,
+        target_px_per_mm = 500,
+        cachedir         = str(tmp_path / 'cache_rings'),
+    )
+    assert len(ds_rings) == 5
+
+    # 2. Failure case: missing file in px_per_mm file
+    bad_pxfile = str(tmp_path / 'bad_px.txt')
+    with open(bad_pxfile, 'w') as f:
+        f.write('im0.png:500\n')
+    with pytest.raises(AssertionError):
+        resolve_px_per_mm(bad_pxfile, [im0, im1])
+
+    # 3. Edge case: single numeric string or float
+    assert resolve_px_per_mm('750', [im0, im1]) == {im0: 750.0, im1: 750.0}
+    assert resolve_px_per_mm(750.0, [im0, im1]) == {im0: 750.0, im1: 750.0}
+
+

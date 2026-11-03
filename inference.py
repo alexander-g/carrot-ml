@@ -10,6 +10,7 @@ import PIL.Image
 
 from traininglib import datalib, modellib, args, inference
 from src import util
+from src.util import resolve_px_per_mm
 
 
 
@@ -68,28 +69,6 @@ def save_output(inferenceitem:InferenceItem, destination:str) -> str:
         return outputpath
     else:
         raise NotImplementedError(type(output))
-
-def resolve_px_per_mm(cli_arg:str, inputfiles:list[str]) -> dict[str, float]:
-    try:
-        px_per_mm = float(cli_arg)
-        return {f:px_per_mm for f in inputfiles}
-    except ValueError:
-        lines = open(cli_arg).read().strip().split('\n')
-        basenames = [os.path.basename(f) for f in inputfiles]
-        per_file  = {}
-        for line in lines:
-            filename, px_per_mm_str = line.strip().split(':')
-            assert filename in basenames, filename
-            filepath = inputfiles[basenames.index(filename)]
-            per_file[filepath] = float(px_per_mm_str)
-        
-        for f in inputfiles:
-            assert f in per_file, f
-        
-        return per_file
-
-
-
 
 def get_parser() -> argparse.ArgumentParser:
     parser = args.base_inference_argparser()

@@ -62,7 +62,7 @@ class TreeringsYOLO_Module(torch.nn.Module):
 def create_dataset_for_yolo(
     splitfile: str, 
     patchsize: int, 
-    px_per_mm: float, 
+    px_per_mm: float | str | dict[str, float], 
     outputdir: str,
     target_px_per_mm: float|None = None
 ) -> str:

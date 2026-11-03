@@ -17,7 +17,7 @@ from traininglib.segmentation import (
     PatchedCachingDataset,
 )
 import traininglib.segmentation.connectedcomponents as concom
-from .util import load_and_scale_image
+from .util import load_and_scale_image, resolve_px_per_mm
 from .cc_postprocessing import remove_small_objects
 
 
@@ -226,12 +226,18 @@ class CC_CellsDataset(PatchedCachingDataset):
         self, 
         filepairs:        tp.List[tp.Tuple[str,str]], 
         patchsize:        int, 
-        px_per_mm:        float,  # input resolution 
+        px_per_mm:        float | str | dict[str, float],  # input resolution 
         target_px_per_mm: float = HARDCODED_GOOD_RESOLUTION,
         *a, 
         **kw
     ):
-        scale = target_px_per_mm / px_per_mm
+        scale: float | list[float]
+        if isinstance(px_per_mm, (int, float)):
+            scale = target_px_per_mm / float(px_per_mm)
+        else:
+            inputs   = [inf for inf, _ in filepairs]
+            resolved = resolve_px_per_mm(px_per_mm, inputs)
+            scale    = [target_px_per_mm / resolved[inf] for inf in inputs]
         super().__init__(filepairs, patchsize, scale, *a, **kw)
         self.items = self.filepairs
     

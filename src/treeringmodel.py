@@ -24,7 +24,7 @@ from traininglib import trainingloop
 
 from . import treerings_clustering_legacy as treeringlib
 from .cc_celldetection import prepare_batch
-from .util import load_and_scale_image
+from .util import load_and_scale_image, resolve_px_per_mm
 
 
 
@@ -84,14 +84,24 @@ class TreeringsDataset(PatchedCachingDataset):
         self, 
         filepairs:        tp.List[tp.Tuple[str,str]], 
         patchsize:        int, 
-        px_per_mm:        float, 
+        px_per_mm:        float | str | dict[str, float], 
         target_px_per_mm: float = HARDCODED_GOOD_RESOLUTION,
         dilation:         int   = 0,
         cachedir:         str   = './cache/',
     ):
-        scale = target_px_per_mm / px_per_mm
+        raw_patchsize: int | list[int]
+        if isinstance(px_per_mm, (int, float)):
+            scale         = target_px_per_mm / float(px_per_mm)
+            raw_patchsize = int(np.ceil(patchsize / scale))
+        else:
+            inputs        = [inf for inf, _ in filepairs]
+            resolved      = resolve_px_per_mm(px_per_mm, inputs)
+            raw_patchsize = [
+                int(np.ceil(patchsize / (target_px_per_mm / resolved[inf])))
+                for inf in inputs
+            ]
         # NOTE: scale=1 because the interpolation mode='nearest' is suboptimal
-        super().__init__(filepairs, int(np.ceil(patchsize/scale)), scale=1.0, cachedir=cachedir)
+        super().__init__(filepairs, raw_patchsize, scale=1.0, cachedir=cachedir)
         
         # resizing to patchsize afterwards here:
         self.items = self._preprocess_treeringmaps(self.filepairs, patchsize, dilation)

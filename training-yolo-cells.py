@@ -48,8 +48,7 @@ def get_argparser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '--px-per-mm', 
-        type = float, 
-        help = 'Image resolution',
+        help     = 'Image resolution, single number or path to a file',
         required = True, 
     )
     parser.add_argument(

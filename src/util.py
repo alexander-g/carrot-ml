@@ -120,6 +120,32 @@ def scale_points_yx(points_yx:np.ndarray, from_shape:Shape, to_shape:Shape) -> n
 
 
 
+def resolve_px_per_mm(
+    cli_arg:    str | float | dict[str, float],
+    inputfiles: list[str],
+) -> dict[str, float]:
+    '''Resolve a px_per_mm argument (number, file path, or dict) per input file.'''
+    if isinstance(cli_arg, dict):
+        return cli_arg
+    try:
+        px_per_mm = float(cli_arg)
+        return {f: px_per_mm for f in inputfiles}
+    except ValueError:
+        lines     = open(str(cli_arg)).read().strip().split('\n')
+        basenames = [os.path.basename(f) for f in inputfiles]
+        per_file: dict[str, float] = {}
+        for line in lines:
+            filename, px_per_mm_str = line.strip().split(':')
+            assert filename in basenames, filename
+            filepath = inputfiles[basenames.index(filename)]
+            per_file[filepath] = float(px_per_mm_str)
+
+        for f in inputfiles:
+            assert f in per_file, f
+
+        return per_file
+
+
 def read_model_metadata(modelpath: str) -> dict[str, str]:
     '''Read metadata dictionary from a .pt.zip or .onnx model file.'''
     try:

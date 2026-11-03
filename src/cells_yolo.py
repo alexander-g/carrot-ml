@@ -328,7 +328,7 @@ def convert_instancemaps_to_yolo_det(
 
 def train_yolo_on_cells(
     splitfile:         str,
-    px_per_mm:         float, 
+    px_per_mm:         float | str | dict[str, float], 
     inputsize:         int,
     epochs:            int,
     batchsize:         int = 4,
