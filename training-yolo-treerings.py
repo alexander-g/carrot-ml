@@ -34,7 +34,8 @@ def main(args:args.Namespace):
         epochs      = args.epochs, 
         inputsize   = args.inputsize, 
         weightsfile = pretrained, 
-        verbose     = True
+        verbose     = True,
+        splitfile   = args.trainsplit,
     )
 
 

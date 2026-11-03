@@ -1,12 +1,15 @@
 import datetime
 import hashlib
 import importlib
+import json
 import os
 import subprocess
 import sys
 import typing as tp
+import zipfile
 
 import numpy as np
+import onnx
 import PIL.Image
 import tifffile
 import torch
@@ -117,20 +120,66 @@ def scale_points_yx(points_yx:np.ndarray, from_shape:Shape, to_shape:Shape) -> n
 
 
 
+def read_model_metadata(modelpath: str) -> dict[str, str]:
+    '''Read metadata dictionary from a .pt.zip or .onnx model file.'''
+    try:
+        if modelpath.endswith('.onnx'):
+            onnx_model = onnx.load(modelpath, load_external_data=False)
+            return {p.key: p.value for p in onnx_model.metadata_props}
+        with zipfile.ZipFile(modelpath, 'r') as zf:
+            for name in zf.namelist():
+                if name.endswith('/meta.json') or name == 'meta.json':
+                    return json.loads(zf.read(name).decode('utf-8'))
+    except Exception:
+        pass
+    return {}
+
+
+def construct_model_metadata(
+    modeltype:  str,
+    dataset:    str | None = None,
+    dirty_time: bool       = False,
+) -> dict[str, str]:
+    '''Construct metadata dictionary for a trained model.'''
+    training_time: str = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    if dirty_time:
+        training_time += '-dirty'
+    dataset_dir: str = (os.path.dirname(dataset) or '.') if dataset else '.'
+    return {
+        'training-time':  training_time,
+        'repo-commit':    git_version('.') or '',
+        'dataset-commit': git_version(dataset_dir) or '' if dataset else '',
+        'cli-args':       ' '.join(sys.argv),
+        'modeltype':      modeltype,
+    }
+
+
 def get_model_version(modelpath:str) -> str:
     with open(modelpath, "rb") as f:
         sha256 = hashlib.file_digest(f, "sha256").hexdigest()
     
     pattern = '%Y-%m-%d'
-    print('TODO: check if training date + code date in the zipfile')
-    try:
-        basename = os.path.basename(modelpath)
-        date = datetime.datetime.strptime(basename[:len('YYYY-MM-DD')], pattern)
-        date_str = date.strftime(pattern)
-    except:
-        timestamp = os.path.getmtime(modelpath)
-        date      = datetime.datetime.fromtimestamp(timestamp)
-        date_str  = date.strftime(pattern)
+    meta = read_model_metadata(modelpath)
+    dates: list[str] = []
+    for key in ('training-time', 'repo-commit'):
+        val = meta.get(key, '')
+        try:
+            date = datetime.datetime.strptime(val[:len('YYYY-MM-DD')], pattern)
+            dates.append(date.strftime(pattern))
+        except Exception:
+            pass
+
+    if dates:
+        date_str = max(dates)
+    else:
+        try:
+            basename = os.path.basename(modelpath)
+            date = datetime.datetime.strptime(basename[:len('YYYY-MM-DD')], pattern)
+            date_str = date.strftime(pattern)
+        except Exception:
+            timestamp = os.path.getmtime(modelpath)
+            date      = datetime.datetime.fromtimestamp(timestamp)
+            date_str  = date.strftime(pattern)
 
     return f'{date_str}:{sha256}'
 

@@ -1,5 +1,6 @@
 import glob
 import io
+import json
 import os
 import shutil
 import time
@@ -38,7 +39,7 @@ from .maskrcnn_celldetection import (
     MaskRCNN_Cells_CARROT,
     InstanceDataset,
 )
-from .util import load_and_scale_image
+from .util import load_and_scale_image, construct_model_metadata
 from .cells_yolo_maskhead import (
     MaskHead, 
     MaskHeadTrainStep,
@@ -174,9 +175,14 @@ class CellsYOLO_Module(torch.nn.Module):
 
 
 
-def extras_for_yolo(exporter:torch.package.PackageExporter):
+def extras_for_yolo(
+    exporter: torch.package.PackageExporter,
+    metadata: dict[str, str] | None = None,
+):
     default_config_yaml = yaml.dump(ultralytics.utils.DEFAULT_CFG_DICT)
     exporter.save_text("ultralytics.extra", "default.yaml", default_config_yaml)
+    if metadata is not None:
+        exporter.save_text("model", "meta.json", json.dumps(metadata, indent=2))
 
 
 def box_overlap_matrix(boxes0:torch.Tensor, boxes1:torch.Tensor) -> torch.Tensor:
@@ -441,6 +447,11 @@ def train_yolo_on_cells(
         CellsYOLO_Module(yolo, head, px_per_mm=HARDCODED_GOOD_RESOLUTION).eval()
     module.inputsize = inputsize
     carrotmodel = CellsYOLO_CARROT(module)
+    carrotmodel.metadata = construct_model_metadata(
+        modeltype  = 'carrot-cells',
+        dataset    = splitfile,
+        dirty_time = (reuse_yolo is not None) or (reuse_maskhead is not None),
+    )
     carrotpath  = os.path.join(outputdir, f'{run_name}/{run_name}.carrot.pt.zip')
     carrotmodel.save(carrotpath)
     return carrotmodel
@@ -525,7 +536,7 @@ head:
 class CellsYOLO_CARROT(MaskRCNN_Cells_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
-        return extras_for_yolo(pe)
+        return extras_for_yolo(pe, getattr(self, 'metadata', None))
 
 
 
@@ -548,7 +559,8 @@ class CellsYOLO_ONNXWrapper(torch.nn.Module):
 def export_cells_yolo_to_onnx(
     module:     CellsYOLO_Module, 
     outputpath: str,
-    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE,
+    metadata:   dict[str, str] | None = None,
 ):
     px_per_mm = module.px_per_mm
     wrapper   = CellsYOLO_ONNXWrapper(module)
@@ -573,7 +585,11 @@ def export_cells_yolo_to_onnx(
     onnxbytes = bytes(buffer.getbuffer())
 
     onnx_model = onnx.load_model_from_string(onnxbytes)
-    meta = {
+    meta = (
+        dict(metadata)
+        if metadata is not None
+        else construct_model_metadata('carrot-cells')
+    ) | {
         "px-per-mm": f"{px_per_mm}",
         "modeltype": "carrot-cells",
     }

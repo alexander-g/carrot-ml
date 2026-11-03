@@ -21,6 +21,7 @@ from src.treerings_yolo import (
     create_new_yolo_sem_model,
     export_treerings_yolo_to_onnx,
 )
+from src.util import read_model_metadata, git_version
 
 
 
@@ -92,6 +93,20 @@ def update(args:argparse.Namespace):
         return
     
     carrotmodule = CARROT_cls(inference)    # type: ignore
+    modeltype = (
+        'carrot-cells'
+        if CARROT_cls is CellsYOLO_CARROT
+        else 'carrot-treerings'
+    )
+    old_meta = read_model_metadata(args.model)
+    metadata = {
+        'training-time':  old_meta.get('training-time', ''),
+        'repo-commit':    git_version('.') or '',
+        'dataset-commit': old_meta.get('dataset-commit', ''),
+        'cli-args':       old_meta.get('cli-args', ''),
+        'modeltype':      old_meta.get('modeltype', modeltype),
+    }
+    carrotmodule.metadata = metadata
 
     basename   = os.path.basename(args.model).removesuffix('.pt.zip')
     outputpath = os.path.join(outputdir, basename+'.carrot.pt.zip')
@@ -102,7 +117,7 @@ def update(args:argparse.Namespace):
     if export_onnx_fn is not None:
         outputpath_onnx = os.path.join(outputdir, basename+'.onnx')
         print(f'Saving ONNX to {outputpath_onnx}')
-        export_onnx_fn(carrotmodule.module, outputpath_onnx, patchsize)
+        export_onnx_fn(carrotmodule.module, outputpath_onnx, patchsize, metadata)
 
 
 def recreate_maskhead_from_carrotptzip(path:str):
