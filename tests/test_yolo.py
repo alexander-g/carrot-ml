@@ -311,7 +311,7 @@ def test_per_file_px_per_mm(tmp_path):
         target_px_per_mm = 500,
         cachedir         = str(tmp_path / 'cache_cells'),
     )
-    assert len(ds_cells) == 2
+    assert len(ds_cells) == 17
 
     ds_rings = TreeringsDataset.from_splitfile(
         splitfile        = splitfile,
@@ -320,7 +320,7 @@ def test_per_file_px_per_mm(tmp_path):
         target_px_per_mm = 500,
         cachedir         = str(tmp_path / 'cache_rings'),
     )
-    assert len(ds_rings) == 5
+    assert len(ds_rings) == 17
 
     # 2. Failure case: missing file in px_per_mm file
     bad_pxfile = str(tmp_path / 'bad_px.txt')

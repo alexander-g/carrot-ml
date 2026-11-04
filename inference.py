@@ -8,19 +8,18 @@ import warnings; warnings.simplefilter('ignore')
 import numpy as np
 import PIL.Image
 
-from traininglib import datalib, modellib, args, inference
+from traininglib import datalib, modellib, args
 from src import util
 from src.util import resolve_px_per_mm
 
 
 
 def main(args: argparse.Namespace):
-    pairs = datalib.load_file_pairs(args.input)
-    if len(pairs) == 0:
+    inputs = datalib.collect_inputfiles(args.input)
+    if len(inputs) == 0:
         print('No inputs')
         return
     
-    inputs = [i for i,_ in pairs]
     px_per_mm = resolve_px_per_mm(args.px_per_mm, inputs)
     
     versions = {
