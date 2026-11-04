@@ -1184,77 +1184,12 @@ Path crop_path_to_aoi(const Path& path, const AreaOfInterestRect& aoi) {
 
 std::optional<PathPair> 
 crop_path_pair_to_aoi(const PathPair& pp, const AreaOfInterestRect& aoi) {
-    const uint32_t n = pp.first.size();
-    // assuming pp.second has the same size
-    if(n == 0)
-        return std::nullopt;
-    
-    const Path polygon = polygon_from_aoi(aoi);
-    const Path& path0  = pp.first;
-    const Path& path1  = pp.second;
-    const std::vector<bool> mask0 = points_in_polygon(path0, polygon);
-    const std::vector<bool> mask1 = points_in_polygon(path1, polygon);
-
-
-    Path output_path0, output_path1;
-    std::optional<Point> path0_p;
-    std::optional<Point> path1_p;
-    for(int i = 0; i < n; i++) {
-        // in last iteration i0 == i1
-        const int i0 = i;
-        const int i1 = std::min(i+1, (int)n-1);
-
-        if(!path0_p && mask0[i0])
-            path0_p = path0[i0];
-        else if(!path0_p && mask0[i1])
-            // path intersects aoi from outside to inside
-            // compute intersection and use this as the point
-            path0_p = 
-                line_segment_polygon_intersection(path0[i0], path0[i1], polygon);
-
-        if(!path1_p && mask1[i0])
-            path1_p = path1[i0];
-        else if(!path1_p && mask1[i1])
-            // path intersects aoi from outside to inside
-            // compute intersection and use this as the point
-            path1_p = 
-                line_segment_polygon_intersection(path1[i0], path1[i1], polygon);
-        
-
-        // if(path0_p && !path1_p)
-        //         // point of the other path is outside aoi, project onto polygon
-        //         path1_p = project_point_onto_path(path1[i0], polygon);
-        // else if(path1_p && !path0_p){
-        //         // point of the other path is outside aoi, project onto polygon
-        //         path0_p = project_point_onto_path(path0[i0], polygon);
-        // }
-
-        
-        if(path0_p && path1_p) {
-            output_path0.push_back(path0_p.value());
-            output_path1.push_back(path1_p.value());
-        }
-
-        // for the next iteration, check if there is another intersection
-        path0_p = std::nullopt;
-        path1_p = std::nullopt;
-        if(mask0[i0] && !mask0[i1])
-            // path intersects aoi from inside to outside
-            // compute intersection and use this as the next point
-            path0_p = 
-                line_segment_polygon_intersection(path0[i0], path0[i1], polygon);
-            
-        if(mask1[i0] && !mask1[i1])
-            // path intersects aoi from inside to outside
-            // compute intersection and use this as the next point
-            path1_p = 
-                line_segment_polygon_intersection(path1[i0], path1[i1], polygon);
-    }
-
-    if(output_path0.empty())
+    const Path path0 = crop_path_to_aoi(pp.first, aoi);
+    const Path path1 = crop_path_to_aoi(pp.second, aoi);
+    if(path0.empty() || path1.empty())
         return std::nullopt;
 
-    return PathPair{ output_path0, output_path1 };
+    return match_path_lengths_by_arclength(path0, path1);
 }
 
 

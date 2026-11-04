@@ -208,5 +208,25 @@ Deno.test('postprocess_combined-with-aoi', async () => {
     asserts.assertGreater(output1.cell_info.length, 0)
     asserts.assertEquals(output1.ring_points_xy.length, 2)
 
+
+    // paths should go all the way to the aoi
+
+    const pathpair0 = output1.ring_points_xy[0]!
+    asserts.assertGreater(pathpair0[0].length, 2)
+    const path0_point0 = pathpair0[0][0]!
+    const path1_point0 = pathpair0[1][0]!
+    asserts.assertGreaterOrEqual(path0_point0[0], 630)
+    asserts.assertAlmostEquals(path0_point0[0], 630, /*tolerance=*/5)
+    asserts.assertGreaterOrEqual(path1_point0[0], 630)
+    asserts.assertAlmostEquals(path1_point0[0], 630, /*tolerance=*/5)
+
+    const path0_lastpoint = pathpair0[0][pathpair0[0].length-1]!
+    const path1_lastpoint = pathpair0[1][pathpair0[1].length-1]!
+    asserts.assertLessOrEqual(path0_lastpoint[0], 1600)
+    asserts.assertAlmostEquals(path0_lastpoint[0], 1600, /*tolerance=*/5)
+    asserts.assertLessOrEqual(path1_lastpoint[0], 1600)
+    asserts.assertAlmostEquals(path1_lastpoint[0], 1600, /*tolerance=*/5)
+
+
 })
 
