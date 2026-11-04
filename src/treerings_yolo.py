@@ -15,7 +15,7 @@ from traininglib import datalib
 
 from .cells_yolo import extras_for_yolo
 from .treeringmodel import Treerings_CARROT, TreeringsInference, TreeringsDataset
-from .util import load_and_scale_image
+from .util import load_and_scale_image, construct_model_metadata
 
 
 
@@ -62,7 +62,7 @@ class TreeringsYOLO_Module(torch.nn.Module):
 def create_dataset_for_yolo(
     splitfile: str, 
     patchsize: int, 
-    px_per_mm: float, 
+    px_per_mm: float | str | dict[str, float], 
     outputdir: str,
     target_px_per_mm: float|None = None
 ) -> str:
@@ -131,6 +131,7 @@ def train_yolo_on_treerings(
     verbose:      bool = False,
     outputdir:    str = 'checkpoints/',
     target_px_per_mm: float|None = None,
+    splitfile:    str | None = None,
 ):
     assert outputdir is not None, 'outputdir currently required'
     outputdir = os.path.abspath(outputdir)
@@ -174,6 +175,10 @@ def train_yolo_on_treerings(
     module = TreeringsYOLO_Module(model, px_per_mm=target_px_per_mm).eval()
     carrotmodel = \
         TreeringsYOLO_CARROT(TreeringsInference(module, patchsize=inputsize))
+    carrotmodel.metadata = construct_model_metadata(
+        modeltype = 'carrot-treerings',
+        dataset   = splitfile or dataset_yaml,
+    )
     
     savepath = os.path.join(outputdir, run_name, 'weights', f'{run_name}.pt.zip')
     carrotmodel.save(savepath)
@@ -293,7 +298,7 @@ head:
 class TreeringsYOLO_CARROT(Treerings_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
-        return extras_for_yolo(pe)
+        return extras_for_yolo(pe, getattr(self, 'metadata', None))
 
 
 
@@ -317,7 +322,8 @@ class TreeringsYOLO_ONNXWrapper(torch.nn.Module):
 def export_treerings_yolo_to_onnx(
     module:     TreeringsInference, 
     outputpath: str,
-    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE,
+    metadata:   dict[str, str] | None = None,
 ):
     px_per_mm = module.module.px_per_mm
     wrapper   = TreeringsYOLO_ONNXWrapper(module.module)
@@ -344,7 +350,11 @@ def export_treerings_yolo_to_onnx(
 
     onnx_model = onnx.load_model_from_string(onnxbytes)
     # onnx_model = onnx.load(outputpath)
-    meta = {
+    meta = (
+        dict(metadata)
+        if metadata is not None
+        else construct_model_metadata('carrot-treerings')
+    ) | {
         "px-per-mm": f"{px_per_mm}",
         "modeltype": "carrot-treerings",
     }
@@ -394,38 +404,11 @@ def start_training_from_carrot(
         progress_callback = progress_callback,
         verbose           = False,
         outputdir         = cachedir,
+        splitfile         = splitfile,
     )
     return carrotmodel
 
 
-
-
-
-if __name__ == '__main__':
-    import os
-    import glob
-    import PIL.Image
-
-    m = ultralytics.YOLO('ultralytics/runs/semantic/train-16/weights/best.pt')
-    inputsize = m.args['imgsz']
-
-    #module = TreeringsYOLO_Module(m, px_per_mm=250*inputsize/1024).eval()
-    module = TreeringsYOLO_Module(m, px_per_mm=150).eval()
-    model  = Treerings_CARROT(TreeringsInference(module, patchsize=inputsize))
-    
-    # imf = 'data/2026-06-29_bw-rings+extra-250/inputs/001_250px-per-mm.png'
-    # output = model.process_image(imf, px_per_mm=250, progress_callback=print)
-
-
-    outputdir = 'DEBUG/2026-08-19_yolo-inference/2026-08-23_rings-250pxpermm'
-    os.makedirs(outputdir, exist_ok=True)
-    for f in glob.glob('data/2026-06-29_bw-rings+extra-250/inputs/*'):
-        print(f)
-        output = model.process_image(f, px_per_mm=250, progress_callback=print, batchsize=1)
-        PIL.Image.fromarray(output).save(f'{outputdir}/{os.path.basename(f)}.png')
-        print()
-
-    print('done')
 
 
 

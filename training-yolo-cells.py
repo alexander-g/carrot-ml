@@ -1,15 +1,26 @@
 import argparse
+import sys
 
 import torch
 
 from traininglib import args, trainingloop
 from src.cells_yolo import train_yolo_on_cells, HARDCODED_DEFAULT_PATCHSIZE
+from src.util import verify_reproducibility
 
 
 def main(args:args.Namespace):
+    if not args.allow_dirty:
+        errors = verify_reproducibility(args)
+        if errors:
+            for err in errors:
+                print(err)
+            sys.exit(1)
 
-    if args.pretrained is None:
-        print('No pretrained model provided.')
+    pretrained = args.pretrained
+    if pretrained.lower() == 'none':
+        pretrained = None
+        if args.reuse_yolo is None:
+            print('No pretrained model provided.')
 
     train_yolo_on_cells(
         splitfile         = args.trainsplit,
@@ -17,9 +28,11 @@ def main(args:args.Namespace):
         inputsize         = args.inputsize,
         batchsize         = args.batchsize,
         epochs            = args.epochs,
-        weightsfile       = args.pretrained,
+        weightsfile       = pretrained,
         progress_callback = None,
         reuse_yolo        = args.reuse_yolo,
+        reuse_maskhead    = args.reuse_maskhead,
+        suffix            = args.suffix,
     )
 
 
@@ -35,15 +48,27 @@ def get_argparser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '--px-per-mm', 
-        type = float, 
-        help = 'Image resolution',
+        help     = 'Image resolution, single number or path to a file',
         required = True, 
     )
     parser.add_argument(
         '--reuse-yolo', 
         help = 'Path to previously trained yolo model. Will not train if provided.'
     )
-    parser.add_argument('--pretrained', help='Path to pretrained yolo model')
+    parser.add_argument(
+        '--reuse-maskhead', 
+        help = 'Path to previously trained mask head. Will not train if provided.'
+    )
+    parser.add_argument(
+        '--pretrained', 
+        required = True, # can be "none" but user must explicitly specify
+        help     = 'Path to pretrained yolo model as starting point, or "none"'
+    )
+    parser.add_argument(
+        '--allow-dirty',
+        action = 'store_true',
+        help   = 'Skip reproducibility checks',
+    )
     return parser
 
 if __name__ == '__main__':

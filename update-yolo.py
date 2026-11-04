@@ -21,6 +21,7 @@ from src.treerings_yolo import (
     create_new_yolo_sem_model,
     export_treerings_yolo_to_onnx,
 )
+from src.util import read_model_metadata, git_version
 
 
 
@@ -37,9 +38,11 @@ def update(args:argparse.Namespace):
         m = ultralytics.YOLO(args.model)  # type: ignore[attr-defined]
         assert args.px_per_mm is not None, '--px-per-mm required for raw YOLO files'
 
-        if m.args['task'] == 'segment':
+        if m.args['task'] == 'detect':
+            assert args.maskhead, '--maskhead required for raw YOLO detect files'
+            maskhead = recreate_maskhead_from_carrotptzip(args.maskhead)
             CARROT_cls = CellsYOLO_CARROT
-            inference  = CellsYOLO_Module(m, args.px_per_mm)
+            inference  = CellsYOLO_Module(m, maskhead, args.px_per_mm)
         elif m.args['task'] == 'semantic':
             CARROT_cls = TreeringsYOLO_CARROT
             inference  = TreeringsInference(
@@ -72,9 +75,7 @@ def update(args:argparse.Namespace):
             yolomodel   = create_new_yolo_det_model('/tmp', inputsize=800)
             px_per_mm   = m.module.px_per_mm
             patchsize   = m.module.inputsize
-            maskhead_kw = infer_maskhead_kw(m.module.maskhead)
-            print(maskhead_kw)
-            maskhead    = MaskHead(**maskhead_kw)
+            maskhead    = recreate_maskhead_from_carrotptzip(args.model)
             inference   = CellsYOLO_Module(yolomodel, maskhead, px_per_mm).eval()
             status      = inference.load_state_dict(m.module.state_dict())
             print(status)
@@ -92,6 +93,20 @@ def update(args:argparse.Namespace):
         return
     
     carrotmodule = CARROT_cls(inference)    # type: ignore
+    modeltype = (
+        'carrot-cells'
+        if CARROT_cls is CellsYOLO_CARROT
+        else 'carrot-treerings'
+    )
+    old_meta = read_model_metadata(args.model)
+    metadata = {
+        'training-time':  old_meta.get('training-time', ''),
+        'repo-commit':    git_version('.') or '',
+        'dataset-commit': old_meta.get('dataset-commit', ''),
+        'cli-args':       old_meta.get('cli-args', ''),
+        'modeltype':      old_meta.get('modeltype', modeltype),
+    }
+    carrotmodule.metadata = metadata
 
     basename   = os.path.basename(args.model).removesuffix('.pt.zip')
     outputpath = os.path.join(outputdir, basename+'.carrot.pt.zip')
@@ -102,14 +117,22 @@ def update(args:argparse.Namespace):
     if export_onnx_fn is not None:
         outputpath_onnx = os.path.join(outputdir, basename+'.onnx')
         print(f'Saving ONNX to {outputpath_onnx}')
-        export_onnx_fn(carrotmodule.module, outputpath_onnx, patchsize)
+        export_onnx_fn(carrotmodule.module, outputpath_onnx, patchsize, metadata)
 
+
+def recreate_maskhead_from_carrotptzip(path:str):
+    old_maskhead = modellib.load_model(path).module.maskhead
+    maskhead_kw = infer_maskhead_kw(old_maskhead)
+    maskhead    = MaskHead(**maskhead_kw)
+    status      = maskhead.load_state_dict(old_maskhead.state_dict())
+    return maskhead
 
 
 def get_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=update.__doc__)
     parser.add_argument('--model', required=True, help='Path to a yolo .pt model')
     parser.add_argument('--px-per-mm', type=float)
+    parser.add_argument('--maskhead', help='Path to .carrot.pt.zip')
     return parser
 
 if __name__ == '__main__':

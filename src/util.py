@@ -1,10 +1,15 @@
 import datetime
 import hashlib
+import importlib
+import json
 import os
 import subprocess
+import sys
 import typing as tp
+import zipfile
 
 import numpy as np
+import onnx
 import PIL.Image
 import tifffile
 import torch
@@ -115,20 +120,92 @@ def scale_points_yx(points_yx:np.ndarray, from_shape:Shape, to_shape:Shape) -> n
 
 
 
+def resolve_px_per_mm(
+    cli_arg:    str | float | dict[str, float],
+    inputfiles: list[str],
+) -> dict[str, float]:
+    '''Resolve a px_per_mm argument (number, file path, or dict) per input file.'''
+    if isinstance(cli_arg, dict):
+        return cli_arg
+    try:
+        px_per_mm = float(cli_arg)
+        return {f: px_per_mm for f in inputfiles}
+    except ValueError:
+        lines     = open(str(cli_arg)).read().strip().split('\n')
+        basenames = [os.path.basename(f) for f in inputfiles]
+        per_file: dict[str, float] = {}
+        for line in lines:
+            filename, px_per_mm_str = line.strip().split(':')
+            assert filename in basenames, filename
+            filepath = inputfiles[basenames.index(filename)]
+            per_file[filepath] = float(px_per_mm_str)
+
+        for f in inputfiles:
+            assert f in per_file, f
+
+        return per_file
+
+
+def read_model_metadata(modelpath: str) -> dict[str, str]:
+    '''Read metadata dictionary from a .pt.zip or .onnx model file.'''
+    try:
+        if modelpath.endswith('.onnx'):
+            onnx_model = onnx.load(modelpath, load_external_data=False)
+            return {p.key: p.value for p in onnx_model.metadata_props}
+        with zipfile.ZipFile(modelpath, 'r') as zf:
+            for name in zf.namelist():
+                if name.endswith('/meta.json') or name == 'meta.json':
+                    return json.loads(zf.read(name).decode('utf-8'))
+    except Exception:
+        pass
+    return {}
+
+
+def construct_model_metadata(
+    modeltype:  str,
+    dataset:    str | None = None,
+    dirty_time: bool       = False,
+) -> dict[str, str]:
+    '''Construct metadata dictionary for a trained model.'''
+    training_time: str = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    if dirty_time:
+        training_time += '-dirty'
+    dataset_dir: str = (os.path.dirname(dataset) or '.') if dataset else '.'
+    return {
+        'training-time':  training_time,
+        'repo-commit':    git_version('.') or '',
+        'dataset-commit': git_version(dataset_dir) or '' if dataset else '',
+        'cli-args':       ' '.join(sys.argv),
+        'modeltype':      modeltype,
+    }
+
+
 def get_model_version(modelpath:str) -> str:
     with open(modelpath, "rb") as f:
         sha256 = hashlib.file_digest(f, "sha256").hexdigest()
     
     pattern = '%Y-%m-%d'
-    print('TODO: check if training date + code date in the zipfile')
-    try:
-        basename = os.path.basename(modelpath)
-        date = datetime.datetime.strptime(basename[:len('YYYY-MM-DD')], pattern)
-        date_str = date.strftime(pattern)
-    except:
-        timestamp = os.path.getmtime(modelpath)
-        date      = datetime.datetime.fromtimestamp(timestamp)
-        date_str  = date.strftime(pattern)
+    meta = read_model_metadata(modelpath)
+    dates: list[str] = []
+    for key in ('training-time', 'repo-commit'):
+        val = meta.get(key, '')
+        try:
+            date = datetime.datetime.strptime(val[:len('YYYY-MM-DD')], pattern)
+            dates.append(date.strftime(pattern))
+        except Exception:
+            pass
+
+    if dates:
+        date_str = max(dates)
+    else:
+        try:
+            basename = os.path.basename(modelpath)
+            date = datetime.datetime.strptime(basename[:len('YYYY-MM-DD')], pattern)
+            date_str = date.strftime(pattern)
+        except Exception:
+            timestamp = os.path.getmtime(modelpath)
+            date      = datetime.datetime.fromtimestamp(timestamp)
+            date_str  = date.strftime(pattern)
 
     return f'{date_str}:{sha256}'
 
@@ -154,4 +231,55 @@ def git_version(folder: str) -> str|None:
         return f"{date}:{commit_hash}{'-dirty' if dirty else ''}"
     except subprocess.CalledProcessError:
         return None
+
+
+def verify_reproducibility(args: tp.Any) -> list[str]:
+    '''Verify repo, dataset, environment, and cli arguments for reproducibility.'''
+    errors: list[str] = []
+
+    repo_version: str | None = git_version('.')
+    if repo_version is None or repo_version.endswith('-dirty'):
+        errors.append(f'Current repository is dirty or not a git repository: {repo_version}')
+
+    dataset_dir: str = os.path.dirname(args.trainsplit) or '.'
+    dataset_version: str | None = git_version(dataset_dir)
+    if dataset_version is None or dataset_version.endswith('-dirty'):
+        errors.append(f'Dataset repository is dirty or not a git repository: {dataset_version}')
+
+    try:
+        frozen: str = open('requirements.frozen.txt').read().strip()
+        installed: str = subprocess.check_output(
+            [sys.executable, '-m', 'pip', 'freeze'],
+            text = True,
+        ).strip()
+    except Exception as exc:
+        errors.append(f'Failed to check pip freeze: {exc}')
+        frozen, installed = '', ''
+
+    if frozen and installed != frozen:
+        errors.append('pip freeze does not match requirements.frozen.txt')
+
+    for line in installed.splitlines():
+        if not line.startswith('-e ') or '#egg=' not in line:
+            continue
+        pkg: str = line.split('#egg=')[-1].split('&')[0].strip()
+        try:
+            mod_file: str | None = getattr(importlib.import_module(pkg), '__file__', None)
+            if mod_file is None:
+                errors.append(f'Editable package {pkg} has no __file__')
+                continue
+            pkg_repo: str = os.path.dirname(os.path.dirname(os.path.realpath(mod_file)))
+            pkg_version: str | None = git_version(pkg_repo)
+            if pkg_version is None or pkg_version.endswith('-dirty'):
+                errors.append(f'Editable package {pkg} is dirty: {pkg_version}')
+        except Exception as exc:
+            errors.append(f'Failed to check editable package {pkg}: {exc}')
+
+    if getattr(args, 'reuse_yolo', None) is not None:
+        errors.append('--reuse-yolo is provided')
+    if getattr(args, 'reuse_maskhead', None) is not None:
+        errors.append('--reuse-maskhead is provided')
+
+    return errors
+
 

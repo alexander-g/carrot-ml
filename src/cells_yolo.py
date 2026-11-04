@@ -1,5 +1,6 @@
 import glob
 import io
+import json
 import os
 import shutil
 import time
@@ -38,11 +39,12 @@ from .maskrcnn_celldetection import (
     MaskRCNN_Cells_CARROT,
     InstanceDataset,
 )
-from .util import load_and_scale_image
+from .util import load_and_scale_image, construct_model_metadata
 from .cells_yolo_maskhead import (
     MaskHead, 
     MaskHeadTrainStep,
-    convert_boxmasks_into_full_result
+    convert_boxmasks_into_full_result,
+    infer_maskhead_kw,
 )
 
 
@@ -173,9 +175,14 @@ class CellsYOLO_Module(torch.nn.Module):
 
 
 
-def extras_for_yolo(exporter:torch.package.PackageExporter):
+def extras_for_yolo(
+    exporter: torch.package.PackageExporter,
+    metadata: dict[str, str] | None = None,
+):
     default_config_yaml = yaml.dump(ultralytics.utils.DEFAULT_CFG_DICT)
     exporter.save_text("ultralytics.extra", "default.yaml", default_config_yaml)
+    if metadata is not None:
+        exporter.save_text("model", "meta.json", json.dumps(metadata, indent=2))
 
 
 def box_overlap_matrix(boxes0:torch.Tensor, boxes1:torch.Tensor) -> torch.Tensor:
@@ -321,7 +328,7 @@ def convert_instancemaps_to_yolo_det(
 
 def train_yolo_on_cells(
     splitfile:         str,
-    px_per_mm:         float, 
+    px_per_mm:         float | str | dict[str, float], 
     inputsize:         int,
     epochs:            int,
     batchsize:         int = 4,
@@ -331,6 +338,8 @@ def train_yolo_on_cells(
     cachedir:          str = 'cache/',
     # if provided, do not train yolo, simply reuse the provided weights
     reuse_yolo:        tp.Optional[str] = None,
+    reuse_maskhead:    tp.Optional[str] = None,
+    suffix:            tp.Optional[str] = None,
 ):
     outputdir = os.path.abspath(outputdir)
     os.makedirs(outputdir, exist_ok=True)
@@ -338,27 +347,54 @@ def train_yolo_on_cells(
     verbose = (progress_callback is None)
     if not verbose:
         ultralytics.utils.set_logging('ultralytics', verbose)
-
-    dataset = InstanceDataset.from_splitfile(
-        splitfile        = splitfile, 
-        patchsize        = inputsize, 
-        px_per_mm        = px_per_mm,
-        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
-        cachedir         = cachedir,
-    )
-    dataset_yaml = convert_instance_dataset_for_yolo(dataset)
-    yolo = create_new_yolo_det_model(os.path.dirname(dataset_yaml), weightsfile)
     
-    if progress_callback is not None:
-        on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
-        yolo.add_callback("on_train_epoch_end", on_epoch_end)
-
-    if not verbose:
-        yolo.overrides['plots'] = False
-    yolo.overrides['val'] = False
-
     run_name = time.strftime("%Y-%m-%d_%Hh%Mm%Ss_cells")
+    if suffix is not None:
+        run_name = f'{run_name}_{suffix}'
+
+
+    if reuse_maskhead is not None:
+        print(f'Re-using YOLO from {reuse_maskhead}')
+        carrotmodel = modellib.load_model(reuse_maskhead)
+        previous_maskhead = carrotmodel.module.maskhead
+        kw   = infer_maskhead_kw(previous_maskhead)
+        head = MaskHead(**kw)
+        print(head.load_state_dict(previous_maskhead.state_dict()))
+    
+    if reuse_yolo is not None:
+        print(f'Re-using YOLO from {reuse_yolo}')
+        weights_dir  = os.path.join(outputdir, run_name, 'weights')
+        weights_path = os.path.join(weights_dir, os.path.basename(reuse_yolo))
+        os.makedirs(weights_dir, exist_ok=True)
+        if reuse_yolo.endswith('.pt'):
+            yolo = ultralytics.YOLO(reuse_yolo)
+            shutil.copy(reuse_yolo, weights_path)
+        elif reuse_yolo.endswith('.pt.zip'):
+            carrotmodel = modellib.load_model(reuse_yolo)
+            _yolo = carrotmodel.module._yolo[0]
+            yolo  = create_new_yolo_det_model(weights_dir)
+            print(yolo.load_state_dict(_yolo.state_dict()))
+
+
     if reuse_yolo is None:
+        dataset = InstanceDataset.from_splitfile(
+            splitfile        = splitfile, 
+            patchsize        = inputsize, 
+            px_per_mm        = px_per_mm,
+            target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
+            cachedir         = cachedir,
+        )
+        dataset_yaml = convert_instance_dataset_for_yolo(dataset)
+        yolo = create_new_yolo_det_model(os.path.dirname(dataset_yaml), inputsize, weightsfile)
+        
+        if progress_callback is not None:
+            on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
+            yolo.add_callback("on_train_epoch_end", on_epoch_end)
+
+        if not verbose:
+            yolo.overrides['plots'] = False
+        yolo.overrides['val'] = False
+
         results = yolo.train(
             data    = dataset_yaml, 
             epochs  = epochs, 
@@ -378,42 +414,44 @@ def train_yolo_on_cells(
         # re-creating yolo, because it contains some crap
         best_pt = os.path.join(outputdir, run_name, 'weights', 'best.pt')
         yolo = ultralytics.YOLO(best_pt)
-    else:
-        print(f'Re-using YOLO from {reuse_yolo}')
-        weights_dir  = os.path.join(outputdir, run_name, 'weights')
-        weights_path = os.path.join(weights_dir, os.path.basename(reuse_yolo))
-        os.makedirs(weights_dir, exist_ok=True)
-        if reuse_yolo.endswith('.pt'):
-            yolo = ultralytics.YOLO(reuse_yolo)
-            shutil.copy(reuse_yolo, weights_path)
-        elif reuse_yolo.endswith('.pt.zip'):
-            carrotmodel = modellib.load_model(reuse_yolo)
-            _yolo = carrotmodel.module._yolo[0]
-            yolo  = create_new_yolo_det_model(weights_dir)
-            print(yolo.load_state_dict(_yolo.state_dict()))
+    # else yolo already loaded above
 
-    dataset = InstanceDataset.from_splitfile(
-        splitfile        = splitfile, 
-        patchsize        = 480, 
-        px_per_mm        = px_per_mm,
-        target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
-        cachedir         = cachedir,
-    )
 
-    head  = MaskHead()
-    step  = MaskHeadTrainStep(head)
-    ld:tp.Sequence = datalib.create_dataloader( # type: ignore
-        dataset, 
-        batch_size = batchsize * 2,  # x2 because model is much smaller
-        shuffle    = True,
-        loader_type = 'threaded',
-    )
-    trainingloop.train(step, ld, epochs=epochs, progress_callback=progress_callback, lr=1e-3)
+    if reuse_maskhead is None:
+        dataset = InstanceDataset.from_splitfile(
+            splitfile        = splitfile, 
+            patchsize        = 480, 
+            px_per_mm        = px_per_mm,
+            target_px_per_mm = HARDCODED_GOOD_RESOLUTION,
+            cachedir         = cachedir,
+        )
+
+        head  = MaskHead()
+        step  = MaskHeadTrainStep(head)
+        ld:tp.Sequence = datalib.create_dataloader( # type: ignore
+            dataset, 
+            batch_size = batchsize * 2,  # x2 because model is much smaller
+            shuffle    = True,
+            loader_type = 'threaded',
+        )
+        trainingloop.train(
+            step, 
+            ld, 
+            epochs = epochs, 
+            lr     = 1e-3,
+            progress_callback = progress_callback, 
+        )
+    # else maskhead already loaded above
 
     module = \
         CellsYOLO_Module(yolo, head, px_per_mm=HARDCODED_GOOD_RESOLUTION).eval()
     module.inputsize = inputsize
     carrotmodel = CellsYOLO_CARROT(module)
+    carrotmodel.metadata = construct_model_metadata(
+        modeltype  = 'carrot-cells',
+        dataset    = splitfile,
+        dirty_time = (reuse_yolo is not None) or (reuse_maskhead is not None),
+    )
     carrotpath  = os.path.join(outputdir, f'{run_name}/{run_name}.carrot.pt.zip')
     carrotmodel.save(carrotpath)
     return carrotmodel
@@ -498,7 +536,7 @@ head:
 class CellsYOLO_CARROT(MaskRCNN_Cells_CARROT):
     # override
     def extra_exports(self, pe:torch.package.PackageExporter):
-        return extras_for_yolo(pe)
+        return extras_for_yolo(pe, getattr(self, 'metadata', None))
 
 
 
@@ -521,7 +559,8 @@ class CellsYOLO_ONNXWrapper(torch.nn.Module):
 def export_cells_yolo_to_onnx(
     module:     CellsYOLO_Module, 
     outputpath: str,
-    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE
+    inputsize:  int = HARDCODED_DEFAULT_PATCHSIZE,
+    metadata:   dict[str, str] | None = None,
 ):
     px_per_mm = module.px_per_mm
     wrapper   = CellsYOLO_ONNXWrapper(module)
@@ -546,7 +585,11 @@ def export_cells_yolo_to_onnx(
     onnxbytes = bytes(buffer.getbuffer())
 
     onnx_model = onnx.load_model_from_string(onnxbytes)
-    meta = {
+    meta = (
+        dict(metadata)
+        if metadata is not None
+        else construct_model_metadata('carrot-cells')
+    ) | {
         "px-per-mm": f"{px_per_mm}",
         "modeltype": "carrot-cells",
     }
