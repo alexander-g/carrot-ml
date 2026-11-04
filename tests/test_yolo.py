@@ -194,6 +194,18 @@ def test_split_overlaps():
     assert output3.sum(0).max() == 1
     # nope no issues
 
+    # bug: inactive mask before overlapping masks remaps indices
+    masks4 = torch.zeros([3, 100, 100], dtype=torch.bool)
+    masks4[0,  0:10,  0:10] = 1   # no overlap
+    masks4[1, 20:50, 20:50] = 1   # overlaps with mask 2
+    masks4[2, 40:90, 20:50] = 1   # overlaps with mask 1
+
+    output4 = split_overlapping_masks(masks4)
+    assert output4.sum(0).max() == 1
+    assert torch.equal(output4[0], masks4[0])
+    assert (output4[1, 20:45, 20:50] == 1).all()
+    assert (output4[2, 45:90, 20:50] == 1).all()
+
 
 def test_verify_reproducibility(monkeypatch, tmp_path):
     import argparse

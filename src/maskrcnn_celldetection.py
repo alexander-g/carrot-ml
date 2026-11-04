@@ -217,9 +217,9 @@ def masks_to_instancemap(
         overlaps = torch.sum(masks, dim=0, keepdim=True) > 1
         masks    = masks * ~overlaps
     
-    instancelabels = \
-        torch.arange(1, n+1, device=masks.device, dtype=torch.int32)
-    instances = (masks * instancelabels.reshape(-1, 1, 1)).max(0)[0]
+    # byte() seems slightly faster
+    instances = masks.byte().argmax(0) + masks.any(0)
+    instances = instances.to(torch.int32)
     return instances
 
 @torch.jit.script_if_tracing
@@ -233,12 +233,19 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     if masks.shape[0] < 2:
         return masks
 
+    # NOTE: converting to float makes this faster, but need to check for onnx
+    counts = masks.float().sum(dim=0)
+    triple_overlaps = (counts >= 3)
+    double_overlaps = (counts == 2)
+
     # removing 3-overlaps, for simplicity
-    overlaps = torch.sum(masks, dim=0, keepdim=True) >= 3
-    masks    = masks * ~overlaps
+    masks = masks * ~triple_overlaps[None]
 
     # only 2-overlaps left
-    overlaps = torch.sum(masks, dim=0, keepdim=False) == 2  # [H,W]
+    overlaps = double_overlaps  # [H,W]
+    if not overlaps.any():
+        return masks
+
     # overlap pixel coordinates
     indices  = torch.nonzero(overlaps) # [M,2]
     
@@ -254,13 +261,15 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     # optional, relabel to range [0,G)
     overlap_labels = torch.unique(overlap_labels, return_inverse=True)[1] # [M]
 
-    # center of each mask
-    centroids = mask_centroids(masks) # [N,2]
+    # center of only the masks participating in overlaps
+    active_masks, inverse_indices = \
+        torch.unique(mask_index_per_pixel, return_inverse=True)
+    active_centroids = mask_centroids(masks[active_masks]) # [K,2]
 
     # distances from mask center to corresponding overlap pixels
     distances = torch.linalg.vector_norm(
-        centroids[mask_index_per_pixel, :]           # [2,M,2]
-        - torch.stack([indices, indices], dim=0),    # [2,M,2]
+        active_centroids[inverse_indices.reshape(2, -1), :] # [2,M,2]
+        - torch.stack([indices, indices], dim=0),           # [2,M,2]
         dim = -1
     ) # [2,M]
 
@@ -286,7 +295,8 @@ def split_overlapping_masks(masks:torch.Tensor) -> torch.Tensor:
     ] # [M]
 
 
-    output = masks.clone()
+    #output = masks.clone()
+    output = masks # no clone, already copied above
     output[:, indices[:,0], indices[:,1]] = 0
     output[mask_per_pixel, indices[:,0], indices[:,1]] = 1
 
