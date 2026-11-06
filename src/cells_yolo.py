@@ -31,8 +31,7 @@ from traininglib.segmentation import (
     get_patch_from_grid,
 )
 from traininglib import trainingloop
-from .cc_celldetection import CC_CellsDataset
-from .cc_postprocessing import delineate_instancemap
+from .cell_utils import delineate_instancemap, CellsDataset
 from .maskrcnn_celldetection import (
     masks_to_instancemap, 
     stitch_and_relabel_instancemaps_from_grid,

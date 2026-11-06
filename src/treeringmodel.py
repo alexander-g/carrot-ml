@@ -23,7 +23,6 @@ from traininglib.paths import pathutils as utils
 from traininglib import trainingloop
 
 from . import treerings_clustering_legacy as treeringlib
-from .cc_celldetection import prepare_batch
 from .util import load_and_scale_image, resolve_px_per_mm
 
 
@@ -31,51 +30,10 @@ from .util import load_and_scale_image, resolve_px_per_mm
 # assuming minimum 0.1mm tree ring width, this results in 25px, should be enough
 HARDCODED_GOOD_RESOLUTION = 250   # px/mm
 
-def resolution_to_scale(px_per_mm:float) -> float:
-    return  HARDCODED_GOOD_RESOLUTION / px_per_mm
-
-HARDCODED_DEFAULT_PATCHSIZE = 512   # px
-
-
-
-
-# basic semantic segmentation
-# instance segmentation during inference via connected components
-class TreeringsModule(unet.UNet):
-    def __init__(self, **kw):
-        super().__init__(output_channels=1, **kw)
-        self.px_per_mm = HARDCODED_GOOD_RESOLUTION
 
 
 
 RawBatch = tp.List[ tp.Tuple[torch.Tensor, torch.Tensor] ]
-
-class TreeringsTrainStep(SaveableModule):
-    def __init__(self, module:TreeringsModule, inputsize:int):
-        super().__init__()
-        self.module    = module
-        self.inputsize = inputsize
-        self._device_indicator = torch.nn.Parameter(torch.empty(0))
-
-    def forward(self, raw_batch:RawBatch):
-        x,t = prepare_batch(
-            raw_batch,
-            augment   = True,
-            patchsize = self.inputsize,
-            device    = self._device_indicator.device
-        )
-        y = self.module(x)
-
-        bce_fn = torch.nn.functional.binary_cross_entropy_with_logits
-        bce    = bce_fn(y, t)
-        mgn    = margin_loss_fn(y, t.bool())
-        loss   = bce + mgn * 0.1
-
-        recall = (y > 0.0)[t > 0].float().mean()
-        
-        logs = { 'bce': float(bce), 'mgn':float(mgn), 'rec':float(recall) }
-        return loss, logs
-
 
 
 
@@ -179,7 +137,7 @@ class TreeringsDataset(PatchedCachingDataset):
 
 #TODO: merge with cells model
 class TreeringsInference(torch.nn.Module):
-    def __init__(self, module:TreeringsModule, patchsize:int):
+    def __init__(self, module:torch.nn.Module, patchsize:int):
         super().__init__()
         self.module = module
         self.patchsize = patchsize
@@ -187,6 +145,7 @@ class TreeringsInference(torch.nn.Module):
 
         self._device_indicator = torch.nn.Parameter(torch.empty(0))
 
+    # NOCMMIT: remove?
     def forward(
         self, 
         x:         torch.Tensor,
@@ -302,42 +261,5 @@ class Treerings_CARROT(SaveableModule):
         return output
 
 
-
-
-def start_training_from_carrot(
-    filepairs: tp.List[tp.Tuple[str,str]],
-    cachedir:  str,
-    px_per_mm: float,
-    epochs:    tp.Optional[int],
-    steps:     tp.Optional[int] = None,
-    progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
-    finetunemodule:    tp.Optional[TreeringsModule] = None,
-) -> Treerings_CARROT:
-    patchsize = HARDCODED_DEFAULT_PATCHSIZE
-
-    module = TreeringsModule()
-    if finetunemodule is not None:
-        print( module.load_state_dict(finetunemodule.state_dict()) )
-    
-    trainstep = TreeringsTrainStep(module, inputsize=patchsize)
-    # NOTE: *2 because of cropping augmentations
-    dataset = TreeringsDataset(
-        filepairs, 
-        patchsize = patchsize*2, 
-        px_per_mm = px_per_mm,
-        cachedir  = cachedir,
-    )
-
-    ld:tp.Sequence = datalib.create_dataloader( # type: ignore
-        dataset, 
-        batch_size = 8,
-        shuffle    = True,
-        loader_type = 'threaded',
-    )
-    trainingloop.train(trainstep, ld, epochs=epochs, steps=steps, progress_callback=progress_callback)
-
-    inference = TreeringsInference(trainstep.module, patchsize)
-    carrotmodel = Treerings_CARROT(inference)
-    return carrotmodel
 
 

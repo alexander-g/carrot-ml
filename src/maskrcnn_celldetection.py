@@ -14,8 +14,7 @@ from traininglib.segmentation import (
     get_patch_from_grid,
 )
 from traininglib import trainingloop
-from .cc_celldetection import CC_CellsDataset
-from .cc_postprocessing import delineate_instancemap
+from .cell_utils import delineate_instancemap, CellsDataset
 from .util import load_and_scale_image
 
 
@@ -358,7 +357,7 @@ def keep_largest_object(masks:torch.Tensor) -> torch.Tensor:
     return torch.stack(output).to(masks.device)
 
 
-class InstanceDataset(CC_CellsDataset):
+class InstanceDataset(CellsDataset):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
 
