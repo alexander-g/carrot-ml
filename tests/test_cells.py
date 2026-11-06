@@ -1,4 +1,3 @@
-#from src.cellsmodel import relabel_instancemaps
 from src.maskrcnn_celldetection import relabel_instancemaps
 
 import torch
