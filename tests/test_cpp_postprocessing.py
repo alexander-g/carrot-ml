@@ -382,6 +382,8 @@ def test_postprocessing_combined():
         if c['year_index'] >= 0:
             assert 0 <= c['position_within'] <= 1
     
+    assert len(output['ring_points_xy']) == len(set(year_indices).difference({-1}))
+
     # bug: boxes in og shape
     all_cellboxes = np.array([c['box_xy'] for c in output['cell_info']])
     assert workshape[0] < all_cellboxes.max(axis=0)[1] <= og_shape[0]
@@ -411,11 +413,6 @@ def test_postprocessing_combined():
     cell2_color = instancemap1[70,270]
     assert cell2_color.tolist() == [224,224,224]
 
-
-    # PIL.Image.open( io.BytesIO(output['ringmap_workshape_png']) ).save('DELETE-ringmap.png')
-    # PIL.Image.open( io.BytesIO(output['cellmap_workshape_png']) ).save('DELETE-cellmap.png')
-    # PIL.Image.open( io.BytesIO(output['treeringmap_workshape_png']) ).save('DELETE-treerings.png')
-    # PIL.Image.open( io.BytesIO(output['instancemap_workshape_png']) ).save('DELETE-instances.png')
 
     # # bug 3  # ignoring for now, probably related to the small workshape
     # cell3_color = instancemap1[28, 128]

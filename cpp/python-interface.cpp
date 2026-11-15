@@ -260,6 +260,7 @@ py::dict postprocess_combined_from_files_py(
     d["ringmap_workshape_png"] =
         buffer_to_bytes(*output_combined.ringmap_rgb_png);
     d["cell_info"] = cell_info_to_py(output_combined.cell_info);
+    d["ring_points_xy"] = vec_paired_paths_to_numpy(output_rings.ring_points_xy);
     return d;
 }
 
