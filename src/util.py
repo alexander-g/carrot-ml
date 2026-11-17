@@ -29,17 +29,24 @@ def load_image(imagepath:str, mode:str='RGB') -> torch.Tensor:
     )
 
 def resize_tensor(
-    x:     torch.Tensor, 
-    shape: Shape, 
-    mode:  str,
+    x:             torch.Tensor, 
+    shape:         Shape, 
+    mode:          str,
     align_corners: tp.Optional[bool] = None,
+    antialias:     bool              = False,
 ) -> torch.Tensor:
     assert len(x.shape) in [3,4]
 
     x0 = x
     if len(x0.shape) == 3:
         x = x[np.newaxis]
-    y = torch.nn.functional.interpolate(x, shape, mode=mode, align_corners=align_corners)
+    y = torch.nn.functional.interpolate(
+        x, 
+        shape, 
+        mode          = mode, 
+        align_corners = align_corners, 
+        antialias     = antialias
+    )
     if len(x0.shape) == 3:
         y = y[0]
     return y
@@ -55,7 +62,7 @@ def load_and_scale_image(path:str, scale:float = 1.0) -> ImageAndOGShape:
         x   = x.permute(2,0,1)
         H,W = x.shape[-2:]
         newshape = ( int(H * scale), int(W * scale) )
-        x = resize_tensor(x, newshape, 'bilinear')
+        x = resize_tensor(x, newshape, mode='bilinear', antialias=True)
         x = x.permute(1,2,0)
         return x, (H,W)
 
@@ -91,7 +98,7 @@ def load_and_scale_tiff(path:str, scale:float, patchsize:int=10240) -> ImageAndO
             j__ = min(int((j + w) * scale), result.shape[2])
 
             newpatchshape = (i__ - i_, j__ - j_)
-            patch = resize_tensor(patch, newpatchshape, 'bilinear')
+            patch = resize_tensor(patch, newpatchshape, 'bilinear', antialias=True)
 
             result[:, i_:i__, j_:j__] = patch[:3]
 

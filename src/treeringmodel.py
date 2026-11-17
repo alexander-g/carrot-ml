@@ -23,7 +23,7 @@ from traininglib.paths import pathutils as utils
 from traininglib import trainingloop
 
 from . import treerings_clustering_legacy as treeringlib
-from .util import load_and_scale_image, resolve_px_per_mm
+from .util import load_and_scale_image, resolve_px_per_mm, resize_tensor
 
 
 
@@ -96,8 +96,9 @@ class TreeringsDataset(PatchedCachingDataset):
                     int( (an.shape[-2] + inputsize)/2 ), 
                     int( (an.shape[-1] + inputsize)/2 )
                 )
-                an = datalib.resize_tensor(an.float(), intermediate_size, mode='bilinear')
-            an = datalib.resize_tensor(an.float(), size=inputsize, mode='bilinear')
+                an = resize_tensor(an.float(), intermediate_size, mode='bilinear', antialias=True)
+            inputshape = (inputsize, inputsize)
+            an = resize_tensor(an.float(), inputshape, mode='bilinear', antialias=True)
             an = (an > 0.0)[0]
             skeleton = skmorph.skeletonize(an.numpy())
             if dilation > 0:
@@ -120,7 +121,8 @@ class TreeringsDataset(PatchedCachingDataset):
         inputfiles = [inf for inf,_ in self.items]
         for i, inf in enumerate(inputfiles):
             x = datalib.load_image(inf, mode='RGB')
-            x = datalib.resize_tensor(x, size=inputsize, mode='bilinear')
+            shape = (inputsize, inputsize)
+            x = resize_tensor(x, shape, mode='bilinear', antialias=True)
             datalib.write_image_tensor(inf, x)
 
     
@@ -178,7 +180,7 @@ class TreeringsInference(torch.nn.Module):
 
         # to f32 CHW
         x = x.permute(2,0,1) / 255
-        x = datalib.resize_tensor2(x, [h,w], 'bilinear' )
+        x = resize_tensor(x, (h,w), 'bilinear', antialias=True)
 
         shape = torch.tensor([h,w])
         grid  = grid_for_patches(shape, self.patchsize, self.slack)
