@@ -20,8 +20,7 @@ from .util import load_and_scale_image, construct_model_metadata
 
 
 # assuming minimum 0.1mm tree ring width, this results in 25px, should be enough
-#HARDCODED_GOOD_RESOLUTION = 250   # px/mm
-HARDCODED_GOOD_RESOLUTION = 150   # px/mm
+HARDCODED_GOOD_RESOLUTION = 250   # px/mm
 
 def resolution_to_scale(px_per_mm:float) -> float:
     return  HARDCODED_GOOD_RESOLUTION / px_per_mm

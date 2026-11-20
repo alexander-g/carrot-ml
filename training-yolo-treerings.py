@@ -22,6 +22,7 @@ def main(args:args.Namespace):
         patchsize = args.inputsize, 
         px_per_mm = args.px_per_mm, 
         outputdir = './cache/',
+        target_px_per_mm = args.target_px_per_mm,
     )
 
     pretrained = args.pretrained
@@ -36,6 +37,7 @@ def main(args:args.Namespace):
         weightsfile = pretrained, 
         verbose     = True,
         splitfile   = args.trainsplit,
+        target_px_per_mm = args.target_px_per_mm,
     )
 
 
@@ -52,6 +54,12 @@ def get_argparser() -> argparse.ArgumentParser:
         '--px-per-mm', 
         help     = 'Image resolution, single number or path to a file',
         required = True, 
+    )
+    parser.add_argument(
+        '--target-px-per-mm',
+        type     = float,
+        help     = 'Input images will be resized to this resolution',
+        required = False, 
     )
     parser.add_argument(
         '--pretrained', 

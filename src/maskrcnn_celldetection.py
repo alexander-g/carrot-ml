@@ -15,7 +15,7 @@ from traininglib.segmentation import (
 )
 from traininglib import trainingloop
 from .cell_utils import delineate_instancemap, CellsDataset
-from .util import load_and_scale_image
+from .util import load_and_scale_image, resize_tensor
 
 
 
@@ -477,7 +477,7 @@ class MaskRCNN_Cells_CARROT(modellib.SaveableModule):
 
         # to f32 CHW
         x = x.permute(2,0,1) / 255
-        x = datalib.resize_tensor2(x, [h,w], 'bilinear' )
+        x = resize_tensor(x, (h,w), mode='bilinear', antialias=True)
 
         shape = torch.tensor([h,w])
         grid  = grid_for_patches(shape, self.patchsize, self.slack).long()
