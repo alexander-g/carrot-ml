@@ -24,6 +24,13 @@ jobs:
           python-version: '3.13' 
           cache: pip
           cache-dependency-path: requirements.frozen.txt
+      
+      - name: build-postprocessing
+        run: |
+          mkdir cpp/build
+          cd cpp/build
+          cmake ..
+          make
 
       - name: fetch-from-huggingface
         env:
@@ -52,7 +59,25 @@ jobs:
           echo "CARROTFILE=${updated_ptzip}" >> "$GITHUB_ENV"
           echo "ONNXFILE=${updated_onnx}" >> "$GITHUB_ENV"
 
+      - name: evaluate
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git clone --depth 1 https://user:${HF_TOKEN}@huggingface.co/datasets/carrot-qwa/angiosperm-treerings-validation-set
+          git clone --depth 1 https://github.com/alexander-g/carrot-evaluation
+          
+          python inference.py \
+            --model=${{env.CARROTFILE}} \
+            --input=angiosperm-treerings-validation-set/splitfile.txt \
+            --px-per-mm=angiosperm-treerings-validation-set/px-per-mm.txt \
+            --output=inference/
 
+          echo "TODO: pip install the deps of the evaluation repo"
+          python carrot-evaluation/evaluate-rings.py \
+            --outputs=inference/ \
+            --annotations=angiosperm-treerings-validation-set/splitfile.txt
+          cat inference/metrics.json
+      
       - name: Archive Models
         uses: actions/upload-artifact@v7
         with:
@@ -60,6 +85,15 @@ jobs:
           path: |
             ${{ env.CARROTFILE }}
             ${{ env.ONNXFILE }}
+          if-no-files-found: error
+
+      
+      - name: Archive Evaluation
+        uses: actions/upload-artifact@v7
+        with:
+          name: evaluation-cells
+          path: |
+            inference/
           if-no-files-found: error
 
 
@@ -149,11 +183,11 @@ jobs:
           python inference.py \
             --model=${{env.CARROTFILE}} \
             --input=angiosperm-vessels-validation-set/splitfile.txt \
-            --px-per-mm=1000                                        \
+            --px-per-mm=angiosperm-vessels-validation-set/px-per-mm.txt \
             --output=inference/
 
           echo "TODO: pip install the deps of the evaluation repo"
-          python carrot-evaluation/evaluate.py \
+          python carrot-evaluation/evaluate-cells.py \
             --outputs=inference/ \
             --annotations=angiosperm-vessels-validation-set/splitfile.txt
           cat inference/metrics.json
@@ -176,21 +210,4 @@ jobs:
             inference/
           if-no-files-found: error
 
-
-
-
-          # TODO:
-          # run tests with this model
-          # compute hashsum of evaluation code
-          # fetch/git clone evaluation set from huggingface
-          # compute hashsum of dataset
-          # if all 3 hashes have not changed, skip
-          # run inference
-          # run postprocessing
-          # run evaluation
-          # evaluation artifcacts
-            # metadata: 3 hashes
-            # metrics json
-            # per-image pixel-wise error maps
-          # model artifacts
 
