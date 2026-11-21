@@ -219,7 +219,7 @@ std::expected<CellsPostprocessingResult, std::string> postprocess_cellmapfile(
         scale_rle_components(cells_rle, worksize, og_size);
 
     const auto t4 = now_ms();
-    printf("CELLS TIMINGS: %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3);
+    // printf("CELLS TIMINGS: %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3);
 
     
     return CellsPostprocessingResult{
@@ -441,8 +441,8 @@ std::expected<CombinedPostprocessingResult, std::string> postprocess_combined(
         return std::unexpected("Failed to compress instancemap to png");
 
     const auto t3 = now_ms();
-    printf("COMBINED TIMINGS: %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2);
-    printf("LOOP: %.1f %.1f %.1f %.1f \n", dt10, dt21, dt32, dt43);
+    // printf("COMBINED TIMINGS: %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2);
+    // printf("LOOP: %.1f %.1f %.1f %.1f \n", dt10, dt21, dt32, dt43);
 
     return CombinedPostprocessingResult{cell_info, *expect_ringmap_workshape_png};
 }

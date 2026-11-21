@@ -1293,7 +1293,7 @@ postprocess_treeringmapfile(
     } //else dont resize here, takes too long
 
     const auto t5 = now_ms();
-    printf("RINGS TIMINGS: %.1f %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3, t5-t4);
+    // printf("RINGS TIMINGS: %.1f %.1f %.1f %.1f %.1f\n", t1-t0, t2-t1, t3-t2, t4-t3, t5-t4);
 
     return TreeringsPostprocessingResult{
         /*treeringmap_workshape_png = */ treeringmap_workshape_png,
