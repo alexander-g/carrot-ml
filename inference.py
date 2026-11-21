@@ -25,7 +25,7 @@ def main(args: argparse.Namespace):
     nfiles = len(inputs)
     if nfiles == 0:
         print('No inputs')
-        return
+        return 1
     
     px_per_mm = resolve_px_per_mm(args.px_per_mm, inputs)
     
@@ -77,7 +77,7 @@ def main(args: argparse.Namespace):
         
         outputpaths = \
             save_output(args.output, InferenceItem(outputitem, outputitem2, imagefile))
-        if outputpaths is not None and postp is not None:
+        if postp is not None:
             postprocess(outputpaths, imagefile)
     print()
 
@@ -96,10 +96,10 @@ class InferenceItem(tp.NamedTuple):
     inputfile: str
 
 class OutputPaths(tp.NamedTuple):
-    cellmap:     str
-    treeringmap: str
+    cellmap:     str|None
+    treeringmap: str|None
 
-def save_output(destination:str, inferenceitem:InferenceItem) -> OutputPaths|None:
+def save_output(destination:str, inferenceitem:InferenceItem) -> OutputPaths:
     output1    = inferenceitem.output1
     output2    = inferenceitem.output2
     inputfile  = inferenceitem.inputfile
@@ -113,6 +113,9 @@ def save_output(destination:str, inferenceitem:InferenceItem) -> OutputPaths|Non
     outputpath = os.path.join(destination, basename + suffix + '.png')
     PIL.Image.fromarray(output1.result).save(outputpath)
 
+    outputpaths = {}
+    outputpaths[output1.modeltype] = outputpath
+
     if output2 is not None:
         suffix  = '.cells' if output2.modeltype == 'carrot-cells' \
             else '.treerings' if output2.modeltype == 'carrot-treerings' \
@@ -120,18 +123,18 @@ def save_output(destination:str, inferenceitem:InferenceItem) -> OutputPaths|Non
         outputpath2 = os.path.join(destination, basename + suffix + '.png')
         PIL.Image.fromarray(output2.result).save(outputpath2)
 
-        outputpaths = {
-            output1.modeltype: outputpath,
-            output2.modeltype: outputpath2
-        }
-        return OutputPaths(
-            cellmap     = outputpaths['carrot-cells'],
-            treeringmap = outputpaths['carrot-treerings'],
-        )
-    return None
+        outputpaths[output2.modeltype] = outputpath2
+    
+    return OutputPaths(
+        cellmap     = outputpaths.get('carrot-cells'),
+        treeringmap = outputpaths.get('carrot-treerings'),
+    )
 
 
 def postprocess(outputpaths:OutputPaths, inputfile:str):
+    if outputpaths.cellmap is None and outputpaths.treeringmap is None:
+        return
+    
     imsize  = PIL.Image.open(inputfile).size
     imshape = imsize[::-1]
     output  = postp.postprocess_combined(
@@ -140,14 +143,18 @@ def postprocess(outputpaths:OutputPaths, inputfile:str):
         workshape = imshape, 
         og_shape  = imshape
     )
-    ringmappath = outputpaths.cellmap.removesuffix('.cells.png') + '.ringmap.png'
-    open(ringmappath, 'wb').write( output['ringmap_workshape_png'] )
+    if outputpaths.cellmap is not None:
+        ringmappath = outputpaths.cellmap.removesuffix('.cells.png') + '.ringmap.png'
+        open(ringmappath, 'wb').write( output['ringmap_workshape_png'] )
 
-    ring_points: list[tuple] = output['ring_points_xy']
-    ring_points_path = \
-        outputpaths.cellmap.removesuffix('.cells.png') + '.ring_points.json'
-    with open(ring_points_path, 'w') as f:
-        json.dump([ (a.tolist(), b.tolist()) for a,b in ring_points ], f, indent=2)
+    if outputpaths.treeringmap is not None:
+        ring_points: list[tuple] = output['ring_points_xy']
+        ring_points_path = \
+            outputpaths.treeringmap.removesuffix('.treerings.png') \
+                + '.ring_points.json'
+        
+        with open(ring_points_path, 'w') as f:
+            json.dump([ (a.tolist(), b.tolist()) for a,b in ring_points ], f, indent=2)
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -167,6 +174,8 @@ def get_parser() -> argparse.ArgumentParser:
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
-    main(args)
+    rc = main(args)
+    if rc is not None:
+        sys.exit(rc)
 
     print('Done')

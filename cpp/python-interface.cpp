@@ -186,81 +186,116 @@ py::dict postprocess_cellmapfile_py(
 }
 
 py::dict postprocess_combined_from_files_py(
-    const std::string& cellmappath,
-    const std::string& treeringmappath,
-    const ImageShape& workshape, 
-    const ImageShape& og_shape,
+    const std::optional<std::string>& cellmappath,
+    const std::optional<std::string>& treeringmappath,
+    const ImageShape&                 workshape, 
+    const ImageShape&                 og_shape,
     const std::optional<py_f64_array> aoi_py = std::nullopt,
-    const std::optional<uint32_t> min_object_size_py = std::nullopt
+    const std::optional<uint32_t>     min_object_size_py = std::nullopt
 ) {
-    const auto expect_fhandle_cells = FileHandle::open(cellmappath.c_str());
-    const auto expect_fhandle_rings = FileHandle::open(treeringmappath.c_str());
-    if(!expect_fhandle_cells)
-        throw std::runtime_error("Could not open cellmap file");
-    if(!expect_fhandle_rings)
-        throw std::runtime_error("Could not open treerings file");
-    const FileHandle* fhandle_cells = expect_fhandle_cells.value().get();
-    const FileHandle* fhandle_rings = expect_fhandle_rings.value().get();
+    std::optional<std::shared_ptr<FileHandle>> fhandle_cells = std::nullopt;
+    std::optional<std::shared_ptr<FileHandle>> fhandle_rings = std::nullopt;
+
+
+    if(cellmappath.has_value()) {
+        const std::string path = cellmappath.value();
+        fhandle_cells = FileHandle::open(path.c_str());
+        if(!fhandle_cells)
+            throw std::runtime_error("Could not open cellmap file");
+    }
+
+    if(treeringmappath.has_value()) {
+        const std::string path = treeringmappath.value();
+        fhandle_rings = FileHandle::open(path.c_str());
+        if(!fhandle_rings)
+            throw std::runtime_error("Could not open treerings file");
+    }
+
+    if(!fhandle_rings && !fhandle_cells)
+        throw std::runtime_error("Neither cellmap nor treeringmap provided");
+
 
     std::optional<AreaOfInterestRect> aoi = std::nullopt;
     if(aoi_py)
         aoi = py_aoi_to_cpp(aoi_py.value());
     const uint32_t min_object_size = min_object_size_py.value_or(10);
 
-    const auto expect_output_cells = postprocess_cellmapfile(
-        fhandle_cells->size, 
-        (const void*) &fhandle_cells->read_callback, 
-        (void*) fhandle_cells, 
-        workshape,
-        og_shape,
-        /*do_not_resize_to_og_shape=*/false,
-        min_object_size
-    );
-    if(!expect_output_cells)
-        throw std::runtime_error(
-            "Cells postprocessing failed: " 
-            + expect_output_cells.error() 
-        );
-    const CellsPostprocessingResult& output_cells = *expect_output_cells;
-
-    const auto expect_output_rings = postprocess_treeringmapfile(
-        fhandle_rings->size, 
-        (const void*) &fhandle_rings->read_callback, 
-        (void*) fhandle_rings, 
-        workshape,
-        og_shape,
-        aoi
-    );
-    if(!expect_output_rings)
-        throw std::runtime_error("Treerings postprocessing failed");
-    const TreeringsPostprocessingResult& output_rings = *expect_output_rings;
-
-    const auto expect_output_combined = 
-        postprocess_combined(
-            output_rings.ring_points_xy, 
-            output_cells.cells, 
+    std::optional<CellsPostprocessingResult> output_cells = std::nullopt;
+    if(fhandle_cells) {
+        // nonconst for std::move
+        auto expect_output_cells = postprocess_cellmapfile(
+            fhandle_cells->get()->size, 
+            (const void*) &fhandle_cells->get()->read_callback, 
+            (void*) fhandle_cells->get(), 
             workshape,
-            og_shape
+            og_shape,
+            /*do_not_resize_to_og_shape=*/false,
+            min_object_size
         );
-    if(!expect_output_combined)
-        throw std::runtime_error(
-            "Combined postprocessing failed:" 
-            + expect_output_combined.error()
+        if(!expect_output_cells)
+            throw std::runtime_error(
+                "Cells postprocessing failed: " + expect_output_cells.error() 
+            );
+        output_cells = std::move(expect_output_cells.value());
+    }
+
+
+    std::optional<TreeringsPostprocessingResult> output_rings = std::nullopt;
+    if(fhandle_rings) {
+        // nonconst for std::move
+        auto expect_output_rings = postprocess_treeringmapfile(
+            fhandle_rings->get()->size, 
+            (const void*) &fhandle_rings->get()->read_callback, 
+            (void*) fhandle_rings->get(), 
+            workshape,
+            og_shape,
+            aoi
         );
-    const CombinedPostprocessingResult& output_combined = *expect_output_combined;
+        if(!expect_output_rings)
+            throw std::runtime_error(
+                "Treerings postprocessing failed" + expect_output_rings.error()
+            );
+        output_rings = std::move(expect_output_rings.value());
+    }
+    
+    std::optional<CombinedPostprocessingResult> output_combined;
+    if(output_rings && output_cells) {
+        // nonconst for std::move
+        auto expect_output_combined = 
+            postprocess_combined(
+                output_rings->ring_points_xy, 
+                output_cells->cells, 
+                workshape,
+                og_shape
+            );
+        if(!expect_output_combined)
+            throw std::runtime_error(
+                "Combined postprocessing failed:" 
+                + expect_output_combined.error()
+            );
+        output_combined = std::move(expect_output_combined.value());
+    }
 
 
     py::dict d;
-    d["cellmap_workshape_png"] = 
-        buffer_to_bytes(*output_cells.cellmap_workshape_png);
-    d["instancemap_workshape_png"] = 
-        buffer_to_bytes(*output_cells.instancemap_workshape_png);
-    d["treeringmap_workshape_png"] = 
-        buffer_to_bytes(*output_rings.treeringmap_workshape_png);
-    d["ringmap_workshape_png"] =
-        buffer_to_bytes(*output_combined.ringmap_rgb_png);
-    d["cell_info"] = cell_info_to_py(output_combined.cell_info);
-    d["ring_points_xy"] = vec_paired_paths_to_numpy(output_rings.ring_points_xy);
+    if(output_cells) {
+        d["cellmap_workshape_png"] = 
+            buffer_to_bytes(*output_cells->cellmap_workshape_png);
+        d["instancemap_workshape_png"] = 
+            buffer_to_bytes(*output_cells->instancemap_workshape_png);
+    }
+
+    if(output_rings) {
+        d["treeringmap_workshape_png"] = 
+            buffer_to_bytes(*output_rings->treeringmap_workshape_png);
+        d["ring_points_xy"] = vec_paired_paths_to_numpy(output_rings->ring_points_xy);
+    }
+
+    if(output_combined) {
+        d["ringmap_workshape_png"] =
+            buffer_to_bytes(*output_combined->ringmap_rgb_png);
+        d["cell_info"] = cell_info_to_py(output_combined->cell_info);
+    }
     return d;
 }
 

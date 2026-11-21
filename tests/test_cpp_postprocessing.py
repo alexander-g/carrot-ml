@@ -417,6 +417,18 @@ def test_postprocessing_combined():
     # # bug 3  # ignoring for now, probably related to the small workshape
     # cell3_color = instancemap1[28, 128]
     # assert cell3_color.tolist() != [224,224,224]
+
+
+    # bug 4: only one file provided, dont segfault
+    output = postp.postprocess_combined(None, treeringfile, workshape, og_shape, min_object_size=5)
+    assert output.get('treeringmap_workshape_png') is not  None
+    assert output.get('ring_points_xy') is not None
+
+    output = postp.postprocess_combined(cellmapfile, None, workshape, og_shape, min_object_size=5)
+    assert output.get('cellmap_workshape_png') is not None
+    assert output.get('instancemap_workshape_png') is not None
+
+
     
 
 
