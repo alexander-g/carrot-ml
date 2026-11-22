@@ -142,7 +142,7 @@ py::list cell_info_to_py(const std::vector<CellInfo>& cell_info) {
             cell.box_xy.y1
         );
         cell_py["year_index"]      = cell.year_index;
-        cell_py["area_px"]         = cell.area_px;
+        cell_py["area"]            = cell.area_px;
         cell_py["position_within"] = cell.position_within;
         out.append(cell_py);
     }

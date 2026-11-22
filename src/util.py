@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import typing as tp
 import zipfile
 
@@ -13,6 +14,8 @@ import onnx
 import PIL.Image
 import tifffile
 import torch
+
+from traininglib import modellib
 
 
 # first height, then width
@@ -187,7 +190,27 @@ def construct_model_metadata(
     }
 
 
+def get_model_weights_version(modelpath:str) -> str:
+    '''SHA256 of the state dict and training date'''
+    meta = read_model_metadata(modelpath)
+    date: str = meta.get('training-time', '')[:len('YYYY-MM-DD')]
+    date = date or 'unknown'
+
+    model = modellib.load_model(modelpath)
+    state = model.state_dict()
+
+    tempdir = tempfile.TemporaryDirectory()
+    path    = os.path.join(tempdir.name, 'model.sd')
+    torch.save(state, path)
+
+    with open(path, "rb") as f:
+        sha256 = hashlib.file_digest(f, "sha256").hexdigest()
+
+    return f'{date}:{sha256}'
+
+
 def get_model_version(modelpath:str) -> str:
+    '''SHA256 of the model file and training/repo date'''
     with open(modelpath, "rb") as f:
         sha256 = hashlib.file_digest(f, "sha256").hexdigest()
     

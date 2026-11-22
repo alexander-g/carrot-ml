@@ -30,8 +30,9 @@ def main(args: argparse.Namespace):
     px_per_mm = resolve_px_per_mm(args.px_per_mm, inputs)
     
     versions = {
-        'model': util.get_model_version(args.model),
-        'dataset': util.git_version(os.path.dirname(args.input))
+        'model':         util.get_model_version(args.model),
+        'model-weights': util.get_model_weights_version(args.model),
+        'dataset':       util.git_version(os.path.dirname(args.input))
     }
 
     model = modellib.load_model(args.model).to(args.device)
@@ -49,6 +50,7 @@ def main(args: argparse.Namespace):
         
         model2 = modellib.load_model(args.model2).to(args.device)
         versions['model2'] = util.get_model_version(args.model2)
+        versions['model2-weights'] = util.get_model_weights_version(args.model2)
 
         if postp is None:
             print('WARNING: two models provided but postprocessing not available')
@@ -143,18 +145,27 @@ def postprocess(outputpaths:OutputPaths, inputfile:str):
         workshape = imshape, 
         og_shape  = imshape
     )
-    if outputpaths.cellmap is not None:
-        ringmappath = outputpaths.cellmap.removesuffix('.cells.png') + '.ringmap.png'
+
+    dirname  = os.path.dirname(outputpaths.cellmap or outputpaths.treeringmap) # type: ignore
+    basename = os.path.basename(inputfile)
+    basepath = os.path.join(dirname, basename)
+    if 'ringmap_workshape_png' in output:
+        ringmappath = basepath + '.ringmap.png'
         open(ringmappath, 'wb').write( output['ringmap_workshape_png'] )
 
-    if outputpaths.treeringmap is not None:
+    if 'ring_points_xy' in output:
         ring_points: list[tuple] = output['ring_points_xy']
-        ring_points_path = \
-            outputpaths.treeringmap.removesuffix('.treerings.png') \
-                + '.ring_points.json'
+        ring_points_path = basepath + '.ring_points.json'
         
         with open(ring_points_path, 'w') as f:
             json.dump([ (a.tolist(), b.tolist()) for a,b in ring_points ], f, indent=2)
+    
+    if 'cell_info' in output:
+        cell_info_path = basepath + '.cell_info.json'
+        cell_info: list[dict] = output['cell_info']
+
+        with open(cell_info_path, 'w') as f:
+            json.dump( cell_info, f, indent=2 )
 
 
 def get_parser() -> argparse.ArgumentParser:
