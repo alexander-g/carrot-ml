@@ -302,10 +302,9 @@ PathPointers get_paths_in_ray(
 
 
 
+using Endpoints = std::pair<Path::const_iterator, Path::const_iterator>;
 
-
-
-Path merge_and_reorder(const Path& path0, const Path& path1) {
+Endpoints which_endpoints_to_connect(const Path& path0, const Path& path1) {
     const Point& p0_start = path0.front();
     const Point& p0_end   = path0.back();
     const Point& p1_start = path1.front();
@@ -324,14 +323,60 @@ Path merge_and_reorder(const Path& path0, const Path& path1) {
     };
     const auto begin_it  = std::begin(distances);
     const auto argmin_it = std::min_element(begin_it, std::end(distances));
-    
-    const auto path1_rev = std::views::reverse(path1);
-    return (argmin_it == begin_it    ) ? concat_copy(path1_rev, path0) 
-         : (argmin_it == begin_it + 1) ? concat_copy(path1,     path0)
-         : (argmin_it == begin_it + 2) ? concat_copy(path0,     path1)
-         :                               concat_copy(path0,     path1_rev);
 
+    const auto path0_first = path0.begin();
+    const auto path0_last  = std::prev(path0.end());
+    const auto path1_first = path1.begin();
+    const auto path1_last  = std::prev(path1.end());
+    return (argmin_it == begin_it    ) ? std::pair{path1_first, path0_first}
+         : (argmin_it == begin_it + 1) ? std::pair{path1_last,  path0_first}
+         : (argmin_it == begin_it + 2) ? std::pair{path0_last,  path1_first}
+         :                               std::pair{path0_last,  path1_last }
+    ;
 }
+
+
+Path merge_and_reorder(const Path& path0, const Path& path1) {
+    const auto endpoints = which_endpoints_to_connect(path0, path1);
+
+    const bool p1_starts_at_join = endpoints.first  == path1.begin();
+    const bool p0_starts_at_join = endpoints.second == path0.begin();
+
+    const auto path1_rev = std::views::reverse(path1);
+    return ( p0_starts_at_join &&  p1_starts_at_join) ? concat_copy(path1_rev, path0) 
+         : ( p0_starts_at_join && !p1_starts_at_join) ? concat_copy(path1,     path0)
+         : (!p0_starts_at_join &&  p1_starts_at_join) ? concat_copy(path0,     path1)
+         :                                              concat_copy(path0,     path1_rev);
+}
+
+
+// Path merge_and_reorder(const Path& path0, const Path& path1) {
+//     const Point& p0_start = path0.front();
+//     const Point& p0_end   = path0.back();
+//     const Point& p1_start = path1.front();
+//     const Point& p1_end   = path1.back();
+
+//     const double d0 = distance(p0_start, p1_start);
+//     const double d1 = distance(p0_start, p1_end);
+//     const double d2 = distance(p0_end,   p1_start);
+//     const double d3 = distance(p0_end,   p1_end);
+
+//     const auto distances = {
+//         distance(p0_start, p1_start),
+//         distance(p0_start, p1_end),
+//         distance(p0_end,   p1_start),
+//         distance(p0_end,   p1_end)
+//     };
+//     const auto begin_it  = std::begin(distances);
+//     const auto argmin_it = std::min_element(begin_it, std::end(distances));
+    
+//     const auto path1_rev = std::views::reverse(path1);
+//     return (argmin_it == begin_it    ) ? concat_copy(path1_rev, path0) 
+//          : (argmin_it == begin_it + 1) ? concat_copy(path1,     path0)
+//          : (argmin_it == begin_it + 2) ? concat_copy(path0,     path1)
+//          :                               concat_copy(path0,     path1_rev);
+
+// }
 
 
 
