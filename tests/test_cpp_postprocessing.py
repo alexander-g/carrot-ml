@@ -245,6 +245,18 @@ def test_postprocess_treeringsmapfile5_no_zero_length_paths():
         assert np.sum( np.abs( np.diff(path0, axis=0) ) ) > 0
         assert np.sum( np.abs( np.diff(path1, axis=0) ) ) > 0
 
+# bug
+def test_postprocess_treeringsmapfile6_artifact():
+    treeringfile = os.path.join( os.path.dirname(__file__), 'assets', 'treeringsmap6-artifact.png' )
+
+    workshape = PIL.Image.open(treeringfile).size[::-1]
+    og_shape  = workshape
+
+    output6 = postp.postprocess_treeringmapfile(treeringfile, workshape, og_shape)
+    assert len(output6['ring_points_xy']) == 2
+    
+
+
 
 def test_postprocess_cellmapfile():
     mask = np.zeros([1000,1000], dtype=bool)
