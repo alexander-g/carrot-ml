@@ -15,7 +15,7 @@ from traininglib import datalib
 
 from .cells_yolo import extras_for_yolo
 from .treeringmodel import Treerings_CARROT, TreeringsInference, TreeringsDataset
-from .util import load_and_scale_image, construct_model_metadata
+from .util import load_and_scale_image, construct_model_metadata, prepare_for_training
 
 
 
@@ -121,35 +121,53 @@ label_mapping:
 
 
 def train_yolo_on_treerings(
-    dataset_yaml: str, 
-    epochs:       int, 
-    inputsize:    int, 
-    batchsize:    int = 4,
-    weightsfile:  tp.Optional[str] = None,
-    progress_callback: tp.Optional[tp.Callable[[float], None]] = None,
-    verbose:      bool = False,
-    outputdir:    str = 'checkpoints/',
-    target_px_per_mm: float|None = None,
-    splitfile:    str | None = None,
+    dataset_yaml:      str, 
+    epochs:            int, 
+    inputsize:         int, 
+    batchsize:         int                             = 4,
+    weightsfile:       str|None                        = None,
+    progress_callback: tp.Callable[[float], None]|None = None,
+    verbose:           bool                            = False,
+    outputdir:         str                             = 'checkpoints/',
+    target_px_per_mm:  float|None                      = None,
+    splitfile:         str | None                      = None,
+    suffix:            str | None                      = None,
+    debug:             bool                            = False,
 ):
     assert outputdir is not None, 'outputdir currently required'
     outputdir = os.path.abspath(outputdir)
     os.makedirs(outputdir, exist_ok=True)
 
+    #run_name = time.strftime("%Y-%m-%d_%Hh%Mm%Ss_treerings")
+    #if suffix is not None:
+    #    run_name = f'{run_name}_{suffix}'
+
     if not verbose:
         ultralytics.utils.set_logging('ultralytics', verbose)
     
-    model = create_new_yolo_sem_model(weightsfile)
+    target_px_per_mm = target_px_per_mm or HARDCODED_GOOD_RESOLUTION
+    meta = construct_model_metadata(
+        modeltype = 'carrot-treerings',
+        dataset   = splitfile or dataset_yaml,
+    )
+
+    yolo        = create_new_yolo_sem_model(weightsfile)
+    module      = TreeringsYOLO_Module(yolo, px_per_mm=target_px_per_mm).eval()
+    carrotmodel = \
+        TreeringsYOLO_CARROT(TreeringsInference(module, patchsize=inputsize))
+
+    carrotmodel, paths = \
+        prepare_for_training(carrotmodel, outputdir, inputsize, epochs, suffix, debug, meta)
+
     if progress_callback is not None:
         on_epoch_end = lambda trainer: progress_callback(trainer.epoch / epochs)
-        model.add_callback("on_train_epoch_end", on_epoch_end)
+        yolo.add_callback("on_train_epoch_end", on_epoch_end)
 
     if not verbose:
-        model.overrides['plots'] = False
-    model.overrides['val'] = False
+        yolo.overrides['plots'] = False
+    yolo.overrides['val'] = False
 
-    run_name = time.strftime("%Y-%m-%d_%Hh%Mm%Ss_treerings")
-    results = model.train(
+    results = yolo.train(
         data    = dataset_yaml, 
         epochs  = epochs, 
         imgsz   = inputsize, 
@@ -160,27 +178,19 @@ def train_yolo_on_treerings(
         workers = 0, 
         batch   = batchsize, 
         verbose = verbose,
-        project = outputdir,
-        name    = run_name,
+        project = paths.checkpointdir,
+        name    = 'yolo',
     )
     # required for pickling:
-    model.clear_callback('on_train_epoch_end')
+    yolo.clear_callback('on_train_epoch_end')
 
-    # re-creating yolo, because it contains some crap
-    best_pt = os.path.join(outputdir, run_name, 'weights', 'best.pt')
-    model = ultralytics.YOLO(best_pt)
+    ok = carrotmodel.module.module._yolo[0].load_state_dict(yolo.state_dict())
+    print(ok)
+    carrotmodel.eval()
 
-    target_px_per_mm = target_px_per_mm or HARDCODED_GOOD_RESOLUTION
-    module = TreeringsYOLO_Module(model, px_per_mm=target_px_per_mm).eval()
-    carrotmodel = \
-        TreeringsYOLO_CARROT(TreeringsInference(module, patchsize=inputsize))
-    carrotmodel.metadata = construct_model_metadata(
-        modeltype = 'carrot-treerings',
-        dataset   = splitfile or dataset_yaml,
-    )
-    
-    savepath = os.path.join(outputdir, run_name, 'weights', f'{run_name}.pt.zip')
-    carrotmodel.save(savepath)
+    carrotmodel.metadata = meta
+    carrotmodel.save(paths.modelpath)
+    os.remove(paths.modelpath_tmp)
     return carrotmodel
 
 
@@ -286,9 +296,18 @@ head:
   # extra block for higher resolution
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
   - [[-1, 2], 1, Concat, [1]]
-  - [-1, 2, C3k2, [128, True]] # 19 (P2/4)
+  - [-1, 2, C3k2, [128, True]] # 19 (x/4)
 
-  - [[-1, 16, 13], 1, SemanticSegment, [nc]] # SemanticSegment
+  # and cat them them together
+  - [10, 1, nn.Upsample, [None, 8, "bilinear"]]   # 20
+  - [-1, 1, Conv, [256, 1, 1]]                    # 21  dimensionality reduction
+  - [13, 1, nn.Upsample, [None, 4, "bilinear"]]   # 22
+  - [-1, 1, Conv, [256, 1, 1]]                    # 23  dimensionality reduction
+  - [16, 1, nn.Upsample, [None, 2, "bilinear"]]   # 24
+  - [[24, 23, 21, 19], 1, Concat, [1]]            # 25 (x/4)
+
+  # NOTE2SELF: SemanticSegment only uses the first two arguments
+  - [[-1, 13], 1, SemanticSegment, [nc]] # SemanticSegment
 '''
 
 

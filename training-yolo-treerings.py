@@ -32,12 +32,13 @@ def main(args:args.Namespace):
     
     carrotmodel = train_yolo_on_treerings(
         dataset_yaml, 
-        epochs      = args.epochs, 
-        inputsize   = args.inputsize, 
-        weightsfile = pretrained, 
-        verbose     = True,
-        splitfile   = args.trainsplit,
+        epochs           = args.epochs, 
+        inputsize        = args.inputsize, 
+        weightsfile      = pretrained, 
+        verbose          = True,
+        splitfile        = args.trainsplit,
         target_px_per_mm = args.target_px_per_mm,
+        suffix           = args.suffix,
     )
 
 

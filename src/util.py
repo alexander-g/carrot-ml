@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import typing as tp
 import zipfile
 
@@ -13,6 +14,8 @@ import onnx
 import PIL.Image
 import tifffile
 import torch
+
+from traininglib import modellib, util
 
 
 # first height, then width
@@ -289,4 +292,45 @@ def verify_reproducibility(args: tp.Any) -> list[str]:
 
     return errors
 
+
+def generate_output_name(
+    checkpointdir: str, 
+    inputsize:     int, 
+    epochs:        int, 
+    suffix:        str|None
+) -> tp.Tuple[str,str]:
+    '''Construct a standardized name, containing current time and some config parameters'''
+    date = time.strftime('%Y-%m-%d')
+    tod  = time.strftime('%Hh%Mm%Ss')
+    sufx = (f'_{suffix}' if suffix else '')
+    path = f'{checkpointdir}/{date}_{tod}_{inputsize}px_{epochs}e{sufx}'
+    name = f'{date}_{sufx}'
+    return path, name
+
+def prepare_for_training(
+    model:         'modellib.SaveableModule',  # needs to be a string
+    checkpointdir: str, 
+    inputsize:     int, 
+    epochs:        int, 
+    suffix:        str|None,
+    debug:         bool,
+    meta:          dict[str,str]|None = None
+) -> tp.Tuple[torch.nn.Module, util.CheckpointPaths]:
+    '''Some housekeeping tasks before training starts'''
+    destination, name = generate_output_name(checkpointdir, inputsize, epochs, suffix)
+    modelpath = os.path.join(destination, name)
+    modelpath_tmp = None
+    if not debug:
+        print('Output directory:', destination)
+        util.backup_code(destination)
+        #save already now and immediately reload
+        #to avoid inconsistencies if the source code changes during training
+        modelpath_tmp = model.save(f'{modelpath}.tmp')
+        model         = modellib.load_model( modelpath_tmp ).train()
+        if meta is not None:
+            with open(os.path.join(destination, 'meta.json'), 'w') as f:
+                json.dump(meta, f)
+    else:
+        print('No checkpoint')
+    return model, util.CheckpointPaths(destination, modelpath, modelpath_tmp)
 
