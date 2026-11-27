@@ -239,7 +239,7 @@ def git_version(folder: str) -> str|None:
         dirty = bool(git(folder, "status", "--porcelain"))
 
         return f"{date}:{commit_hash}{'-dirty' if dirty else ''}"
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
 
